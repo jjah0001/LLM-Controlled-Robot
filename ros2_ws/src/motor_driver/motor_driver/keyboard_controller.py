@@ -29,6 +29,10 @@ class KeyboardController(Node):
                     msg.data = 'right'
                 elif key == 'x':
                     msg.data = 'stop'
+                elif key == 'i':   # Up arrow (Linux/macOS terminals)
+                    msg.data = 'increase'
+                elif key == 'k':   # Down arrow
+                    msg.data = 'decrease'
                 elif key == '\x03':  # Ctrl+C
                     break
                 else:
