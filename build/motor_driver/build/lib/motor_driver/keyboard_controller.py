@@ -10,7 +10,6 @@ class KeyboardController(Node):
         super().__init__('keyboard_controller')
         self.publisher = self.create_publisher(String, 'motor_command', 10)
         self.get_logger().info('Keyboard Controller Ready. Use keys: W/A/S/D/X')
-        self.subscriber = self.create_subscription(String, 'ultrasonic_data', self.listener_callback, 10)
 
         self.key_loop()
 
@@ -56,19 +55,11 @@ class KeyboardController(Node):
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
         return key
-    
-    def listener_callback(self, msg):
-        distance = msg.data
-        self.get_logger().info(f'Ultrasonic Reading: {str(distance)}')
 
 def main(args=None):
     rclpy.init(args=args)
-    keyboard_node = KeyboardController()
-    try:
-        rclpy.spin(keyboard_node)
-    except KeyboardInterrupt:
-        pass
-    keyboard_node.destroy_node()
+    node = KeyboardController()
+    node.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
@@ -11,7 +10,6 @@ class MotorDriver(Node):
         self.subscription = self.create_subscription(
             String, 'motor_command', self.listener_callback, 10
         )
-
 
         # Pin (BCM)
         self.dir_pins = [17, 22, 23, 24]   # IN1..IN4

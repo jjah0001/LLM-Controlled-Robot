@@ -1,0 +1,41 @@
+running egg_info
+creating ../../../build/ultrasonic_control/ultrasonic_control.egg-info
+writing ../../../build/ultrasonic_control/ultrasonic_control.egg-info/PKG-INFO
+writing dependency_links to ../../../build/ultrasonic_control/ultrasonic_control.egg-info/dependency_links.txt
+writing entry points to ../../../build/ultrasonic_control/ultrasonic_control.egg-info/entry_points.txt
+writing requirements to ../../../build/ultrasonic_control/ultrasonic_control.egg-info/requires.txt
+writing top-level names to ../../../build/ultrasonic_control/ultrasonic_control.egg-info/top_level.txt
+writing manifest file '../../../build/ultrasonic_control/ultrasonic_control.egg-info/SOURCES.txt'
+reading manifest file '../../../build/ultrasonic_control/ultrasonic_control.egg-info/SOURCES.txt'
+writing manifest file '../../../build/ultrasonic_control/ultrasonic_control.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build
+creating /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib
+creating /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control
+copying ultrasonic_control/ultrasonic_publisher.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control
+copying ultrasonic_control/__init__.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control
+copying ultrasonic_control/motor_driver.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control
+running install
+running install_lib
+creating /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control
+copying /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control/ultrasonic_publisher.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control
+copying /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control/__init__.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control
+copying /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control/motor_driver.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control
+byte-compiling /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control/ultrasonic_publisher.py to ultrasonic_publisher.cpython-312.pyc
+byte-compiling /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control/__init__.py to __init__.cpython-312.pyc
+byte-compiling /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control/motor_driver.py to motor_driver.cpython-312.pyc
+running install_data
+creating /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ament_index
+creating /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ament_index/resource_index
+creating /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ament_index/resource_index/packages
+copying resource/ultrasonic_control -> /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ament_index/resource_index/packages
+copying package.xml -> /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ultrasonic_control
+creating /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ultrasonic_control/launch
+copying launch/bringup.launch.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ultrasonic_control/launch
+running install_egg_info
+Copying ../../../build/ultrasonic_control/ultrasonic_control.egg-info to /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control-0.0.1-py3.12.egg-info
+running install_scripts
+Installing motor_driver script to /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/ultrasonic_control
+Installing ultrasonic_publisher script to /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/ultrasonic_control
+writing list of installed files to '/home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/install.log'

@@ -1,0 +1,17 @@
+package.xml
+setup.cfg
+setup.py
+../../../build/py_hello_world/py_hello_world.egg-info/PKG-INFO
+../../../build/py_hello_world/py_hello_world.egg-info/SOURCES.txt
+../../../build/py_hello_world/py_hello_world.egg-info/dependency_links.txt
+../../../build/py_hello_world/py_hello_world.egg-info/entry_points.txt
+../../../build/py_hello_world/py_hello_world.egg-info/requires.txt
+../../../build/py_hello_world/py_hello_world.egg-info/top_level.txt
+../../../build/py_hello_world/py_hello_world.egg-info/zip-safe
+py_hello_world/__init__.py
+py_hello_world/publisher.py
+py_hello_world/subscriber.py
+resource/py_hello_world
+test/test_copyright.py
+test/test_flake8.py
+test/test_pep257.py

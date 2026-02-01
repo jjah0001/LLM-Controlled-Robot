@@ -1,0 +1,3 @@
+[console_scripts]
+hello_pub = py_hello_world.publisher:main
+hello_sub = py_hello_world.subscriber:main
