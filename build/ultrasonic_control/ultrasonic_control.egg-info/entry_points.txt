@@ -1,3 +1,0 @@
-[console_scripts]
-motor_driver = ultrasonic_control.motor_driver:main
-ultrasonic_publisher = ultrasonic_control.ultrasonic_publisher:main
