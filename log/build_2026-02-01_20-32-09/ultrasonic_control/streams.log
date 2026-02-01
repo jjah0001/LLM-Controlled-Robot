@@ -1,0 +1,43 @@
+[0.802s] Invoking command in '/home/jeffreyye/Documents/LLM-Controlled-Robot/ros2_ws/src/ultrasonic_control': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../../build/ultrasonic_control build --build-base /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build install --record /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/install.log --single-version-externally-managed install_data
+[0.977s] running egg_info
+[0.977s] creating ../../../build/ultrasonic_control/ultrasonic_control.egg-info
+[0.990s] writing ../../../build/ultrasonic_control/ultrasonic_control.egg-info/PKG-INFO
+[0.990s] writing dependency_links to ../../../build/ultrasonic_control/ultrasonic_control.egg-info/dependency_links.txt
+[0.990s] writing entry points to ../../../build/ultrasonic_control/ultrasonic_control.egg-info/entry_points.txt
+[0.990s] writing requirements to ../../../build/ultrasonic_control/ultrasonic_control.egg-info/requires.txt
+[0.990s] writing top-level names to ../../../build/ultrasonic_control/ultrasonic_control.egg-info/top_level.txt
+[0.990s] writing manifest file '../../../build/ultrasonic_control/ultrasonic_control.egg-info/SOURCES.txt'
+[1.018s] reading manifest file '../../../build/ultrasonic_control/ultrasonic_control.egg-info/SOURCES.txt'
+[1.019s] writing manifest file '../../../build/ultrasonic_control/ultrasonic_control.egg-info/SOURCES.txt'
+[1.019s] running build
+[1.019s] running build_py
+[1.019s] creating /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build
+[1.019s] creating /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib
+[1.019s] creating /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control
+[1.019s] copying ultrasonic_control/ultrasonic_publisher.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control
+[1.020s] copying ultrasonic_control/__init__.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control
+[1.020s] copying ultrasonic_control/motor_driver.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control
+[1.020s] running install
+[1.024s] running install_lib
+[1.038s] creating /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control
+[1.038s] copying /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control/ultrasonic_publisher.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control
+[1.038s] copying /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control/__init__.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control
+[1.038s] copying /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build/lib/ultrasonic_control/motor_driver.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control
+[1.038s] byte-compiling /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control/ultrasonic_publisher.py to ultrasonic_publisher.cpython-312.pyc
+[1.039s] byte-compiling /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control/__init__.py to __init__.cpython-312.pyc
+[1.039s] byte-compiling /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control/motor_driver.py to motor_driver.cpython-312.pyc
+[1.040s] running install_data
+[1.040s] creating /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ament_index
+[1.040s] creating /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ament_index/resource_index
+[1.040s] creating /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ament_index/resource_index/packages
+[1.040s] copying resource/ultrasonic_control -> /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ament_index/resource_index/packages
+[1.040s] copying package.xml -> /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ultrasonic_control
+[1.040s] creating /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ultrasonic_control/launch
+[1.040s] copying launch/bringup.launch.py -> /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/share/ultrasonic_control/launch
+[1.040s] running install_egg_info
+[1.055s] Copying ../../../build/ultrasonic_control/ultrasonic_control.egg-info to /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages/ultrasonic_control-0.0.1-py3.12.egg-info
+[1.055s] running install_scripts
+[1.142s] Installing motor_driver script to /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/ultrasonic_control
+[1.142s] Installing ultrasonic_publisher script to /home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/ultrasonic_control
+[1.142s] writing list of installed files to '/home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/install.log'
+[1.178s] Invoked command in '/home/jeffreyye/Documents/LLM-Controlled-Robot/ros2_ws/src/ultrasonic_control' returned '0': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/jeffreyye/Documents/LLM-Controlled-Robot/install/ultrasonic_control/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../../build/ultrasonic_control build --build-base /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/build install --record /home/jeffreyye/Documents/LLM-Controlled-Robot/build/ultrasonic_control/install.log --single-version-externally-managed install_data

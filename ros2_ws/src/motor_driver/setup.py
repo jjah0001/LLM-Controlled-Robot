@@ -22,7 +22,7 @@ setup(
     'console_scripts': [
         'motor_driver_node = motor_driver.motor_driver_node:main',
         'keyboard_controller = motor_driver.keyboard_controller:main',
-        'ultrasonic_controller = motor_driver.ultrasonic_controller:main',
+        'ultrasonic_node = motor_driver.ultrasonic_node:main',
     		],
 	},
 

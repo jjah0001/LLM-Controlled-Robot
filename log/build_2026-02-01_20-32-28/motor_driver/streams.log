@@ -1,0 +1,23 @@
+[0.831s] Invoking command in '/home/jeffreyye/Documents/LLM-Controlled-Robot/ros2_ws/src/motor_driver': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/jeffreyye/Documents/LLM-Controlled-Robot/build/motor_driver/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/jeffreyye/Documents/LLM-Controlled-Robot/install/motor_driver/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../../build/motor_driver build --build-base /home/jeffreyye/Documents/LLM-Controlled-Robot/build/motor_driver/build install --record /home/jeffreyye/Documents/LLM-Controlled-Robot/build/motor_driver/install.log --single-version-externally-managed install_data
+[1.006s] running egg_info
+[1.019s] writing ../../../build/motor_driver/motor_driver.egg-info/PKG-INFO
+[1.019s] writing dependency_links to ../../../build/motor_driver/motor_driver.egg-info/dependency_links.txt
+[1.019s] writing entry points to ../../../build/motor_driver/motor_driver.egg-info/entry_points.txt
+[1.019s] writing requirements to ../../../build/motor_driver/motor_driver.egg-info/requires.txt
+[1.019s] writing top-level names to ../../../build/motor_driver/motor_driver.egg-info/top_level.txt
+[1.044s] reading manifest file '../../../build/motor_driver/motor_driver.egg-info/SOURCES.txt'
+[1.045s] writing manifest file '../../../build/motor_driver/motor_driver.egg-info/SOURCES.txt'
+[1.045s] running build
+[1.045s] running build_py
+[1.045s] running install
+[1.050s] running install_lib
+[1.063s] running install_data
+[1.063s] running install_egg_info
+[1.076s] removing '/home/jeffreyye/Documents/LLM-Controlled-Robot/install/motor_driver/lib/python3.12/site-packages/motor_driver-0.0.0-py3.12.egg-info' (and everything under it)
+[1.077s] Copying ../../../build/motor_driver/motor_driver.egg-info to /home/jeffreyye/Documents/LLM-Controlled-Robot/install/motor_driver/lib/python3.12/site-packages/motor_driver-0.0.0-py3.12.egg-info
+[1.077s] running install_scripts
+[1.164s] Installing keyboard_controller script to /home/jeffreyye/Documents/LLM-Controlled-Robot/install/motor_driver/lib/motor_driver
+[1.164s] Installing motor_driver_node script to /home/jeffreyye/Documents/LLM-Controlled-Robot/install/motor_driver/lib/motor_driver
+[1.164s] Installing ultrasonic_node script to /home/jeffreyye/Documents/LLM-Controlled-Robot/install/motor_driver/lib/motor_driver
+[1.164s] writing list of installed files to '/home/jeffreyye/Documents/LLM-Controlled-Robot/build/motor_driver/install.log'
+[1.185s] Invoked command in '/home/jeffreyye/Documents/LLM-Controlled-Robot/ros2_ws/src/motor_driver' returned '0': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/jeffreyye/Documents/LLM-Controlled-Robot/build/motor_driver/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/jeffreyye/Documents/LLM-Controlled-Robot/install/motor_driver/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../../build/motor_driver build --build-base /home/jeffreyye/Documents/LLM-Controlled-Robot/build/motor_driver/build install --record /home/jeffreyye/Documents/LLM-Controlled-Robot/build/motor_driver/install.log --single-version-externally-managed install_data
