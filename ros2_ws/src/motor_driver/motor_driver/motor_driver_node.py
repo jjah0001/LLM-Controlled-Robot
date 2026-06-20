@@ -26,6 +26,8 @@ class MotorDriver(Node):
         self.pwmA.start(0)
         self.pwmB.start(0)
 
+        self.MIN_DUTY = 60.0  # minimum duty cycle (%) when motor is active
+
         self._last_cmd_time = self.get_clock().now()
         self._timeout_timer = self.create_timer(0.1, self._check_timeout)
 
@@ -45,6 +47,8 @@ class MotorDriver(Node):
 
     def _set_motor_a(self, speed: float):
         duty = abs(speed) * 100.0
+        if duty > 0:
+            duty = max(self.MIN_DUTY, duty)
         if speed > 0:
             GPIO.output(self.IN1, GPIO.LOW)
             GPIO.output(self.IN2, GPIO.HIGH)
@@ -58,6 +62,8 @@ class MotorDriver(Node):
 
     def _set_motor_b(self, speed: float):
         duty = abs(speed) * 100.0
+        if duty > 0:
+            duty = max(self.MIN_DUTY, duty)
         if speed > 0:
             GPIO.output(self.IN3, GPIO.HIGH)
             GPIO.output(self.IN4, GPIO.LOW)
