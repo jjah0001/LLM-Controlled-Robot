@@ -1,129 +1,93 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String
+from geometry_msgs.msg import Twist
 import RPi.GPIO as GPIO
-import time
+
 
 class MotorDriver(Node):
     def __init__(self):
         super().__init__('motor_driver')
         self.subscription = self.create_subscription(
-            String, 'motor_command', self.listener_callback, 10
+            Twist, '/cmd_vel', self.cmd_vel_callback, 10
         )
 
-
-        # Pin (BCM)
-        self.dir_pins = [17, 22, 23, 24]   # IN1..IN4
-        self.en_pins  = [18, 19]           # ENA, ENB (PWM)
-        self.motor_pins = self.dir_pins + self.en_pins
+        # Motor A (Left):  IN1=17, IN2=22, ENA=18 (PWM)
+        # Motor B (Right): IN3=23, IN4=24, ENB=19 (PWM)
+        self.IN1, self.IN2, self.ENA = 17, 22, 18
+        self.IN3, self.IN4, self.ENB = 23, 24, 19
 
         GPIO.setmode(GPIO.BCM)
-        for pin in self.motor_pins:
+        for pin in [self.IN1, self.IN2, self.IN3, self.IN4, self.ENA, self.ENB]:
             GPIO.setup(pin, GPIO.OUT)
 
-        self.f_pwm = 2000          # MULAI di 2 kHz dulu (RPi.GPIO di 20 kHz sering jitter)
-        self.default_duty = 60.0   # %
-        self.pwmA = GPIO.PWM(18, self.f_pwm)
-        self.pwmB = GPIO.PWM(19, self.f_pwm)
+        self.pwmA = GPIO.PWM(self.ENA, 2000)
+        self.pwmB = GPIO.PWM(self.ENB, 2000)
         self.pwmA.start(0)
         self.pwmB.start(0)
 
-        self.get_logger().info('Motor driver node started.')
+        self._last_cmd_time = self.get_clock().now()
+        self._timeout_timer = self.create_timer(0.1, self._check_timeout)
 
-    def listener_callback(self, msg):
-        command = msg.data.strip().lower()
-        self.get_logger().info(f'Received command: {command}')
+        self.get_logger().info('Motor driver node started, listening on /cmd_vel.')
 
-        # HANYA cocokkan string persis 'forward', 'backward', dll.
-        # Kalau kamu publish 'forward 0.5' ini TIDAK akan cocok.
-        if command == 'forward':
-            self.forward(0.5)
-        elif command == 'backward':
-            self.backward(0.5)
-        elif command == 'left':
-            self.left(0.5)
-        elif command == 'right':
-            self.right(0.5)
-        elif command == 'increase':
-            self.increase_speed()
-        elif command == 'decrease':
-            self.decrease_speed()
-        elif command == 'stop':
-            self.stop()
+    def cmd_vel_callback(self, msg: Twist):
+        self._last_cmd_time = self.get_clock().now()
+
+        linear = msg.linear.x
+        angular = msg.angular.z
+
+        left = max(-1.0, min(1.0, linear - angular))
+        right = max(-1.0, min(1.0, linear + angular))
+
+        self._set_motor_a(left)
+        self._set_motor_b(right)
+
+    def _set_motor_a(self, speed: float):
+        duty = abs(speed) * 100.0
+        if speed > 0:
+            GPIO.output(self.IN1, GPIO.LOW)
+            GPIO.output(self.IN2, GPIO.HIGH)
+        elif speed < 0:
+            GPIO.output(self.IN1, GPIO.HIGH)
+            GPIO.output(self.IN2, GPIO.LOW)
         else:
-            self.get_logger().warn('Unknown command! Use: forward/backward/left/right/stop')
-
-    def _set_speed(self, duty_percent):
-        duty = max(0.0, min(100.0, float(duty_percent)))
+            GPIO.output(self.IN1, GPIO.LOW)
+            GPIO.output(self.IN2, GPIO.LOW)
         self.pwmA.ChangeDutyCycle(duty)
+
+    def _set_motor_b(self, speed: float):
+        duty = abs(speed) * 100.0
+        if speed > 0:
+            GPIO.output(self.IN3, GPIO.HIGH)
+            GPIO.output(self.IN4, GPIO.LOW)
+        elif speed < 0:
+            GPIO.output(self.IN3, GPIO.LOW)
+            GPIO.output(self.IN4, GPIO.HIGH)
+        else:
+            GPIO.output(self.IN3, GPIO.LOW)
+            GPIO.output(self.IN4, GPIO.LOW)
         self.pwmB.ChangeDutyCycle(duty)
 
-    def forward(self, sec):
-        # Arah: sesuaikan dengan wiring kamu
-        GPIO.output(17, GPIO.LOW)
-        GPIO.output(22, GPIO.HIGH)
-        GPIO.output(23, GPIO.HIGH)
-        GPIO.output(24, GPIO.LOW)
-        self._set_speed(self.default_duty)   # <<< penting!
-        time.sleep(sec)
-        self.stop()
-
-    def backward(self, sec):
-        GPIO.output(17, GPIO.HIGH)
-        GPIO.output(22, GPIO.LOW)
-        GPIO.output(23, GPIO.LOW)
-        GPIO.output(24, GPIO.HIGH)
-        self._set_speed(self.default_duty)
-        time.sleep(sec)
-        self.stop()
-
-    def left(self, sec):
-        GPIO.output(17, GPIO.HIGH)
-        GPIO.output(22, GPIO.LOW)
-        GPIO.output(23, GPIO.HIGH)
-        GPIO.output(24, GPIO.LOW)
-        self._set_speed(self.default_duty)
-        time.sleep(sec)
-        self.stop()
-
-    def right(self, sec):
-        GPIO.output(17, GPIO.LOW)
-        GPIO.output(22, GPIO.HIGH)
-        GPIO.output(23, GPIO.LOW)
-        GPIO.output(24, GPIO.HIGH)
-        self._set_speed(self.default_duty)
-        time.sleep(sec)
-        self.stop()
-
-    def increase_speed(self):
-        self.default_duty += 5.0
-        self.get_logger().info(f'Speed is now: {self.default_duty}%')
-
-    def decrease_speed(self):
-        self.default_duty -= 5.0
-        self.get_logger().info(f'Speed is now: {self.default_duty}%')
-
     def stop(self):
-        # Matikan daya motor dengan duty 0 dan lepas arah
-        self._set_speed(0.0)
-        for pin in self.dir_pins:
-            GPIO.output(pin, GPIO.LOW)
-        # (Pilihan) kalau mau benar-benar disable, juga LOW-kan ENA/ENB:
-        # for pin in self.en_pins:
-        #     GPIO.output(pin, GPIO.LOW)
+        self._set_motor_a(0.0)
+        self._set_motor_b(0.0)
+
+    def _check_timeout(self):
+        elapsed = (self.get_clock().now() - self._last_cmd_time).nanoseconds / 1e9
+        if elapsed > 0.5:
+            self.stop()
 
     def destroy_node(self):
         try:
-            self._set_speed(0.0)
-            for pin in self.motor_pins:
-                GPIO.output(pin, GPIO.LOW)
+            self.stop()
             self.pwmA.stop()
             self.pwmB.stop()
             GPIO.cleanup()
         except Exception as e:
             self.get_logger().error(f'Cleanup error: {e}')
         super().destroy_node()
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -134,6 +98,7 @@ def main(args=None):
         pass
     node.destroy_node()
     rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
