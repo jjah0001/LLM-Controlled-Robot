@@ -49,6 +49,41 @@ Jazzy packages are built for Ubuntu 24.04 only.
 6. When it says the write is finished, take out the card and put it in the Pi (the slot is on
    the underside).
 
+### Without Raspberry Pi Imager
+
+Any tool that writes a disk image to an SD card works. You set up Wi-Fi by editing a file on
+the card instead of in Imager.
+
+1. Download **Ubuntu Server 24.04 LTS (64-bit) for Raspberry Pi** from
+   [ubuntu.com/download/raspberry-pi](https://ubuntu.com/download/raspberry-pi). The file
+   ends in `.img.xz`. You don't need to unzip it.
+2. Write it to the card with [balenaEtcher](https://etcher.balena.io/): **Flash from file** →
+   pick the `.img.xz` → **Select target** → your microSD card → **Flash**. Double-check the
+   target, because the card is erased.
+3. Take the card out and put it back in. A drive called **system-boot** appears. Open the file
+   `network-config` on it in a plain text editor (TextEdit in plain-text mode on a Mac,
+   Notepad on Windows). Add your Wi-Fi below the `ethernets:` section, keeping these exact
+   spaces (no tabs):
+   ```yaml
+   wifis:
+     wlan0:
+       dhcp4: true
+       optional: true
+       access-points:
+         "YOUR-WIFI-NAME":
+           password: "YOUR-WIFI-PASSWORD"
+   ```
+   Use a **2.4 GHz** network if your router has separate 2.4 and 5 GHz names.
+4. Save, eject the card and put it in the Pi.
+
+In Step 2, the username is `ubuntu` instead of `robot`, so use it wherever this guide says
+`robot`. The `.local` name doesn't work yet, so find the Pi's IP address in your router's
+device list (it shows up as `ubuntu`) and connect with, for example,
+`ssh ubuntu@192.168.1.42`. The first password is `ubuntu`, and Ubuntu makes you choose a new
+one straight away and then logs you out, so connect again with the new password. Then run
+`sudo hostnamectl set-hostname scout`, so `scout.local` works after Step 2's reboot. With no Wi-Fi at all, you can plug the
+Pi into your router with an Ethernet cable instead.
+
 ## Step 2: Connect to the Pi
 
 1. Power on the Pi and **wait about 5 minutes**. The first boot sets everything up and may
