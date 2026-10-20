@@ -8,6 +8,10 @@ motion_controller:
     scan_timeout_s: 0.6
     ultrasonic_timeout_s: 0.5
     max_intent_duration_s: 6.0
+    # Edge (cliff) sensors: the launch argument use_cliff:=true turns this on and starts
+    # cliff_publisher. When on, the robot does not travel unless /cliff is fresh and clear.
+    use_cliff_sensors: false
+    cliff_timeout_s: 0.3
     # LiDAR mounting. Check with: ros2 topic echo /perception/summary
     # (hold a box in front of the robot: lidar_sectors_m.front must drop).
     lidar_yaw_offset_deg: 0.0     # rotate the scan so 0 deg is straight ahead
@@ -18,11 +22,6 @@ motion_controller:
     robot_half_width_m: 0.10
     corridor_margin_m: 0.05
     ultrasonic_to_front_m: 0.0    # ultrasonic face -> front bumper (0 if flush)
-    # Edge (drop) sensor, a second HC-SR04 at the front bumper pointing at the floor.
-    # Turn it on with the launch argument use_edge_sensor:=true. Forward motion stops when
-    # it reads further than edge_max_floor_m, gets no echo, or goes silent.
-    edge_max_floor_m: 0.10        # set to (sensor height above the floor) + about 0.04 m
-    edge_timeout_s: 0.5
     # Motion envelope
     max_linear: 0.25              # m/s
     max_angular: 1.2              # rad/s
@@ -82,14 +81,13 @@ ultrasonic_publisher:
     rate_hz: 15.0
     timeout_s: 0.025
 
-edge_sensor:                    # optional downward HC-SR04 (use_edge_sensor:=true)
+cliff_publisher:                # downward IR edge sensors; setup in the README ("Edge sensors")
   ros__parameters:
-    trig_pin: 5                   # BCM
-    echo_pin: 6                   # BCM, through a 5V -> 3.3V divider like the front sensor
-    frame_id: edge_sensor_link
-    rate_hz: 15.0
-    timeout_s: 0.025
-    max_range: 1.0
+    sensor_names: [front_left, front_right]   # must start with "front" or "rear"
+    sensor_pins: [5, 6]           # BCM pins, same order as sensor_names
+    drop_level: 1                 # GPIO level meaning "no floor" (1 for TCRT5000/FC-51 modules)
+    rate_hz: 50.0
+    clear_count: 3                # floor readings in a row before an edge counts as gone
 
 camera:                         # camera_ros; setup steps in the README ("RPi Camera setup")
   ros__parameters:

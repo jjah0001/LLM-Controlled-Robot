@@ -15,12 +15,14 @@ setup(
     zip_safe=True,
     maintainer='jeffrey',
     maintainer_email='jeffrey.jahja7@gmail.com',
-    description='Front HC-SR04 ultrasonic range publisher (plus a legacy drive-until-obstacle demo).',
+    description=('Front HC-SR04 ultrasonic range and IR edge (cliff) sensor publishers '
+                 '(plus a legacy drive-until-obstacle demo).'),
     license='MIT',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'ultrasonic_publisher = ultrasonic_control.ultrasonic_publisher:main',
+            'cliff_publisher = ultrasonic_control.cliff_publisher:main',
             'motor_driver = ultrasonic_control.motor_driver:main',
         ],
     },

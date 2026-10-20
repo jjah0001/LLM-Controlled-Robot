@@ -48,10 +48,10 @@ message with:
 metres from the robot centre. front_clearance_m / rear_clearance_m = free space between the \
 bumper and the nearest obstacle in the straight-line path (null = nothing seen). ultrasonic_m \
 ("clear" = nothing in range). controller_flags = what the safety layer is doing \
-(blocked_front, slowing_front, emergency_stop_front, steering_away_from_wall, edge_front, \
-emergency_stop_edge, ...). edge_sensor = the downward drop sensor: "floor_ok", "drop_ahead" \
-(no floor in front: stairs or a ledge), "sensor_stale" or "not_fitted" (then only your camera \
-can spot drops). active_intent = the motion you chose last time and how long it has left.
+(blocked_front, slowing_front, emergency_stop_front, cliff_front, steering_away_from_wall, \
+...). cliff = the downward edge sensors (edge_ahead / edge_behind true = the floor ends \
+there), or a note that none are installed (then only your camera can spot drops). \
+active_intent = the motion you chose last time and how long it has left.
 - motor_power: the motors' current floor mode and PWM duty range.
 - recent_decisions_oldest_first: your last few decisions, each with the front clearance at the \
 time. If you kept asking to move but the distances stayed the same, you are probably stalled.
@@ -74,11 +74,12 @@ direction and pace, not low-level safety. If front_clearance_m is under about 0.
 front is blocked, rotate in place (linear 0) toward the most open sector rather than pushing \
 forward. Reverse only when boxed in. If the sensors or image look unreliable, go slowly or stop.
 
-Edges: the LiDAR and front ultrasonic look straight ahead and cannot see a drop. If edge_sensor \
-is "drop_ahead" or a controller flag mentions an edge, back away slowly (linear about -0.3) \
-and turn away; never try forward again there. If you see stairs, a step down, a ledge or the \
+Edges: falling is the worst thing that can happen to you, and the LiDAR and front ultrasonic \
+look straight ahead, so they cannot see a drop. If cliff.edge_ahead is true or the flags show \
+cliff_front, back away slowly (linear about -0.3 for about 1 s), then turn away from the edge; \
+never try forward again there. If you see stairs, a step down, a ledge or the \
 edge of a table or platform in the image, stay well away (at least half a metre) and note it. \
-If edge_sensor is "not_fitted" and there is no camera image, move only slowly (linear 0.3 or \
+If no cliff sensors are installed and there is no camera image, move only slowly (linear 0.3 or \
 less) and only over floor you have already crossed.
 
 Current mission: {mission}

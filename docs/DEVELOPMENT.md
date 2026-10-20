@@ -24,7 +24,7 @@ latency); a local controller runs at 20 Hz and owns smoothness and safety.
 ```
  /scan (LaserScan, m1ct_d2) ─────┐
  ultrasonic/range (Range) ───────┤
- edge/range (Range, optional) ───┤
+ /cliff (JSON, optional) ────────┤
                                  ▼
                   motion_controller_node (20 Hz)  ──► /cmd_vel ──► motor_driver_node ──► L298N
                    fuse sensors, ramp velocity,         (Twist)     twist→wheel PWM,
@@ -59,12 +59,13 @@ latency); a local controller runs at 20 Hz and owns smoothness and safety.
 |---|---|---|
 | `claude_ros` | `claude_agent_node`, `motion_controller_node` | The brain + local controller. Launch files and `config/robot.yaml` live here. |
 | `motor_driver` | `motor_driver_node`, `keyboard_controller` | L298N driver on `/cmd_vel`; keyboard teleop for testing. |
-| `ultrasonic_control` | `ultrasonic_publisher`, `motor_driver` (legacy) | Publishes `ultrasonic/range`. The legacy `motor_driver` here is an old drive-until-obstacle demo; **never run it alongside `motor_driver_node`** (same GPIO pins). |
+| `ultrasonic_control` | `ultrasonic_publisher`, `cliff_publisher`, `motor_driver` (legacy) | Publishes `ultrasonic/range` and the IR edge sensors on `/cliff` (`use_cliff:=true`). The legacy `motor_driver` here is an old drive-until-obstacle demo; **never run it alongside `motor_driver_node`** (same GPIO pins). |
 | `py_hello_world` | `hello_pub`, `hello_sub` | ROS tutorial, unused by the robot. |
 
 Pure logic is kept free of ROS imports so it unit-tests anywhere:
 `claude_ros/perception.py` (scan → sectors/clearances, sensor fusion),
-`claude_ros/control.py` (ramping, speed caps, avoidance, e-stop),
+`claude_ros/control.py` (ramping, speed caps, avoidance, e-stop, edges),
+`ultrasonic_control/cliff.py` (edge sensor debounce),
 `claude_ros/intent.py` (schema + validation), `claude_ros/memory.py` (note store),
 `motor_driver/kinematics.py` (twist → wheel duty).
 Put new logic there and keep the `*_node.py` files as thin ROS wiring.
@@ -91,6 +92,7 @@ Tests (no ROS or Pi needed):
 ```bash
 cd ros2_ws/src/claude_ros && python3 -m pytest -q test/
 cd ros2_ws/src/motor_driver && python3 -m pytest -q test/test_wheels.py
+cd ros2_ws/src/ultrasonic_control && python3 -m pytest -q test/test_cliff.py
 ```
 
 Useful checks on the robot:
@@ -118,8 +120,8 @@ Most important on a new robot:
 ## Hardware facts
 
 - BCM pins: L298N IN1=17, IN2=22, ENA=18 (left), IN3=23, IN4=24, ENB=19 (right);
-  HC-SR04 TRIG=4, ECHO=27 (ECHO is 5 V: use a divider to 3.3 V); optional downward edge
-  HC-SR04 TRIG=5, ECHO=6 (same divider), enabled with `use_edge_sensor:=true`.
+  HC-SR04 TRIG=4, ECHO=27 (ECHO is 5 V: use a divider to 3.3 V); IR edge sensors
+  front_left=5, front_right=6 (3.3 V powered, `cliff_publisher`, `use_cliff:=true`).
 - LiDAR on `/dev/ttyUSB0` @ 230400; install `sc_mini.rules` from the driver repo for permissions.
 - The robot uses a Raspberry Pi 4 (`RPi.GPIO` works; on a Pi 5 you would need `python3-rpi-lgpio`).
 
@@ -130,11 +132,13 @@ Most important on a new robot:
   it to `lidar` and passes parameters from `robot.yaml`; `perception.scan_to_polar` drops the zeros.
 - The ultrasonic follows REP 117: `+inf` = nothing in range. A silent topic means a faulty sensor.
 - `/cmd_vel` must have exactly one publisher while driving (the motion controller).
-- Edges: the LiDAR plane and the front ultrasonic cannot see a drop. With the edge sensor
-  enabled, `control.step` zeroes forward speed immediately (no ramp) when
-  `perception.edge_ahead` is true, which includes a stale sensor (fail-safe). Reversing and
-  turning in place stay allowed so Scout can back away. Without the sensor, only Claude's
-  camera can spot stairs.
+- Edges: the LiDAR plane and the front ultrasonic cannot see a drop. With `use_cliff:=true`,
+  `control.step` zeroes speed toward a drop seen on `/cliff` immediately (no ramp), and blocks
+  all travel if `/cliff` goes silent (fail-safe). Turning in place and backing away stay
+  allowed. `cliff_publisher` debounces towards "drop", starts as "drop" until the floor is seen,
+  and pulls the inputs towards the drop level so a loose wire stops the robot. The controller
+  also ticks straight away when a new edge arrives. Without the sensors, only Claude's camera
+  can spot stairs.
 - Motor start kick: `kick_s` > 0 gives a `kick_duty` burst when a wheel starts or reverses
   (`kinematics.StartKick`). The watchdog re-applies the last command every 0.1 s so it ends on
   time.

@@ -67,10 +67,3 @@ def test_fuse_front_takes_most_pessimistic():
     assert pc.fuse_front(0.3, math.inf) == 0.3
     assert pc.fuse_front(None, 0.5, ultrasonic_to_front_m=0.1) == 0.4
     assert pc.fuse_front(None, None) is None
-
-
-def test_edge_ahead():
-    assert not pc.edge_ahead(0.06, 0.10)       # floor where it should be
-    assert pc.edge_ahead(0.35, 0.10)           # step down
-    assert pc.edge_ahead(math.inf, 0.10)       # no echo: no floor in range
-    assert pc.edge_ahead(None, 0.10)           # stale sensor fails safe
