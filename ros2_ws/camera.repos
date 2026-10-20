@@ -1,0 +1,7 @@
+# Raspberry Pi's libcamera fork, needed for the RPi Camera on Ubuntu (see README, "RPi Camera").
+# From ros2_ws/:  vcs import src < camera.repos
+repositories:
+  libcamera:
+    type: git
+    url: https://github.com/raspberrypi/libcamera.git
+    version: main

@@ -56,9 +56,14 @@ motor_driver:
   ros__parameters:
     max_wheel_speed_mps: 0.30     # wheel speed at 100% duty; calibrate on the floor
     track_width_m: 0.16           # distance between the two wheels
-    min_duty: 60.0                # % duty below which the motors stall (old code used 60; lower it if your motors start lower, for gentler starts)
-    max_duty: 100.0
+    # Motor power. All of these can be changed while driving, e.g. on carpet:
+    #   ros2 param set /motor_driver min_duty 80.0
+    # or at launch: ros2 launch claude_ros robot.launch.py min_duty:=80 kick_s:=0.25
+    min_duty: 60.0                # % duty at the slowest speed; raise it if the wheels stall (carpet: ~75-90)
+    max_duty: 100.0               # % duty at full speed
     deadband: 0.02                # wheel commands below this fraction -> motor off
+    kick_duty: 100.0              # % duty for a short burst when a wheel starts or reverses
+    kick_s: 0.0                   # length of that burst in s; 0 = off (carpet: 0.15-0.3)
     pwm_hz: 1000.0
     cmd_timeout_s: 0.5
     invert_left: false
@@ -69,15 +74,18 @@ ultrasonic_publisher:
     rate_hz: 15.0
     timeout_s: 0.025
 
-camera:
+camera:                         # camera_ros; setup steps in the repo README ("RPi Camera")
   ros__parameters:
+    camera: 0                     # first camera libcamera finds (`cam -l` lists them)
     width: 640
     height: 480
     format: RGB888
+    orientation: 0                # 180 if the camera is mounted upside down
+    # sensor_mode: "1640:1232"    # Camera Module 2: full field of view instead of a 640x480 crop
 
-lidar:
+lidar:                          # m1ct_d2 (D05 LiDAR); setup steps in the repo README ("LiDAR")
   ros__parameters:
-    port: /dev/ttyUSB0
+    port: /dev/ttyUSB0            # the launch argument lidar_port overrides this
     baudrate: 230400
     frame_id: laser_link
     version: 4

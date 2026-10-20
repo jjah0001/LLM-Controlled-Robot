@@ -73,6 +73,7 @@ Put new logic there and keep the `*_node.py` files as thin ROS wiring.
 ```bash
 cd ros2_ws
 vcs import src < robot.repos              # D05 LiDAR driver + camera_ros (first time)
+# RPi Camera: also build Raspberry Pi's libcamera fork, see the README ("RPi Camera")
 sudo apt install ros-jazzy-cv-bridge python3-opencv python3-numpy
 pip install --break-system-packages -U anthropic   # or use a venv visible to ROS
 source /opt/ros/jazzy/setup.bash
@@ -107,7 +108,9 @@ Most important on a new robot:
    `lidar_sectors_m.front` drops; put it on the left and check `left` drops.
 2. **Footprint**: `lidar_to_front_m`, `lidar_to_rear_m`, `robot_half_width_m`.
 3. **Motors**: `max_wheel_speed_mps` (measure), `track_width_m`, `min_duty` (lowest duty that
-   still turns the wheels), `invert_left` / `invert_right`.
+   still turns the wheels), `kick_duty` / `kick_s` (start burst for carpet),
+   `invert_left` / `invert_right`. The motor parameters can be changed live with
+   `ros2 param set /motor_driver ...`; see the README ("Motor power").
 4. **Agent**: `model` (default `claude-opus-5-5`; `claude-haiku-5-5` for lower latency/cost),
    `effort`, `decision_period_s`, `mission`, `persona_file`, `memory_file`, `memory_recall`.
 5. **Personality**: edit the repo-root `CLAUDE.md`; restart the agent to apply.
@@ -116,7 +119,10 @@ Most important on a new robot:
 
 - BCM pins: L298N IN1=17, IN2=22, ENA=18 (left), IN3=23, IN4=24, ENB=19 (right);
   HC-SR04 TRIG=4, ECHO=27 (ECHO is 5 V: use a divider to 3.3 V).
-- LiDAR on `/dev/ttyUSB0` @ 230400; install `sc_mini.rules` from the driver repo for permissions.
+- LiDAR on `/dev/ttyUSB0` @ 230400; install `sc_mini.rules` from the driver repo for permissions
+  (README, "LiDAR").
+- RPi Camera via `camera_ros`, which needs Raspberry Pi's libcamera fork on Ubuntu
+  (`ros2_ws/camera.repos`, README "RPi Camera").
 - On a Pi 5, `RPi.GPIO` does not work: install `python3-rpi-lgpio` (drop-in replacement).
 
 ## Gotchas

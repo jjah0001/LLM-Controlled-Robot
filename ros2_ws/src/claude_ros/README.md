@@ -22,7 +22,8 @@ ros2 launch claude_ros robot.launch.py
 ```
 
 Launch arguments: `use_lidar`, `use_camera`, `use_agent` (true/false), `lidar_port`,
-`model`, `mission`, `params_file`.
+`model`, `mission`, `params_file`, and the motor power overrides `min_duty`, `max_duty`,
+`kick_duty`, `kick_s`. LiDAR, camera and motor-power setup are in the repository README.
 
 ## Topics
 
