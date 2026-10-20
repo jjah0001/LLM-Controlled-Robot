@@ -47,6 +47,10 @@ claude_agent:
     jpeg_quality: 75
     history_length: 6
     mission: "Explore the area safely, heading for open space and avoiding obstacles."
+    persona_file: ""              # robot identity; "" = find the repo's CLAUDE.md automatically
+    memory_file: ~/.ros/robot_memory/notes.jsonl   # delete to make the robot forget
+    memory_recall: 30             # notes replayed to Claude with every decision
+    memory_max_notes: 500         # oldest notes are dropped beyond this
 
 motor_driver:
   ros__parameters:

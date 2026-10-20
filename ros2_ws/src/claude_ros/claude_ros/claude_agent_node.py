@@ -11,10 +11,16 @@ Subscribes:
   /perception/summary   std_msgs/String     (fused LiDAR + ultrasonic, from motion_controller)
 Publishes:
   /claude/intent        std_msgs/String     (JSON, see claude_ros/intent.py)
+  /claude/say           std_msgs/String     (words for people nearby; feed a TTS node)
+  /claude/note          std_msgs/String     (each new memory note)
+
+The robot's identity comes from the repository's CLAUDE.md; its memory notes are
+kept in a JSON Lines file (memory_file) and replayed into every request.
 """
 import base64
 import collections
 import json
+import os
 import threading
 import time
 
@@ -28,38 +34,66 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
 from claude_ros import intent as intent_mod
+from claude_ros.memory import NoteStore
 
-SYSTEM_PROMPT = """You are the navigation brain of a small differential-drive robot.
-Every couple of seconds you get a fresh camera frame and a fused distance summary, and you \
-choose the next motion. A local controller executes your choice smoothly (it ramps speed, \
-slows near obstacles, steers away from walls and stops on its own if something gets too close), \
-so you set the direction and pace, not the low-level safety.
+# The robot's identity (who it is, goals, hardware, senses, actions, personality,
+# communication, memory) lives in the repository's CLAUDE.md and is loaded at start-up.
+# These rules are the technical contract with the motion controller and stay in code.
+OPERATING_RULES = """# Operating rules (from the control software)
 
-Sensors:
-- Camera: forward-facing RPi Camera, roughly 60 degrees horizontal field of view.
-- LiDAR (360 degree dTOF): nearest obstacle per 45 degree sector, metres from the robot centre. \
-Sectors: front, front_left, left, back_left, back, back_right, right, front_right.
-- Ultrasonic: forward only, catches glass and low objects the LiDAR misses. \
-"clear" = nothing in range.
-- front_clearance_m / rear_clearance_m: free space between the bumper and the nearest obstacle in \
-the robot's straight-line path (null = nothing seen).
-- controller_flags tell you what the safety layer did, e.g. blocked_front, slowing_front, \
-emergency_stop_front, steering_away_from_wall.
+Every {period:.0f} s or so you receive the latest camera frame (if the camera works) and a JSON \
+message with:
+- sensors: the fused view from the motion controller. lidar_sectors_m = nearest obstacle per \
+45 degree sector (front, front_left, left, back_left, back, back_right, right, front_right), \
+metres from the robot centre. front_clearance_m / rear_clearance_m = free space between the \
+bumper and the nearest obstacle in the straight-line path (null = nothing seen). ultrasonic_m \
+("clear" = nothing in range). controller_flags = what the safety layer is doing \
+(blocked_front, slowing_front, emergency_stop_front, steering_away_from_wall, ...). \
+active_intent = the motion you chose last time and how long it has left.
+- recent_decisions_oldest_first: your last few decisions.
+- memory_notes: notes you saved earlier, oldest first.
 
-Your decision:
+Answer with one decision:
 - linear: -1..1 fraction of max forward speed. angular: -1..1 fraction of max turn rate, \
 positive turns left (counter-clockwise).
-- duration_s: how long to hold this motion if no newer decision arrives. Your next decision \
-usually arrives within {period:.0f}-{horizon:.0f} s, so pick about {horizon:.0f} s for steady \
-motion, shorter for tentative moves.
-- Prefer smooth, continuous motion: gentle curves (linear 0.3-0.8 with a modest angular) over \
-stop-and-turn. Keep consistent with your recent decisions unless the scene changed.
-- If front_clearance_m is under about 0.4 m or the front is blocked, turn toward the most open \
-sector (rotate in place with linear 0) instead of pushing forward. Reverse only when boxed in.
-- If the sensors or the image look unreliable, choose a slow or zero motion.
+- duration_s: how long to hold this motion if no newer decision arrives. The next decision \
+usually arrives within {period:.0f}-{horizon:.0f} s, so about {horizon:.0f} s keeps motion \
+continuous; use less for tentative moves.
+- reason: one short sentence, for the logs.
+- say: words to speak to people nearby, or "" (most of the time).
+- note: a new fact worth remembering for later, or "". Don't repeat notes you already have.
 
-Mission: {mission}
+The motion controller ramps speed, slows near obstacles and stops on its own, so you choose \
+direction and pace, not low-level safety. If front_clearance_m is under about 0.4 m or the \
+front is blocked, rotate in place (linear 0) toward the most open sector rather than pushing \
+forward. Reverse only when boxed in. If the sensors or image look unreliable, go slowly or stop.
+
+Current mission: {mission}
 """
+
+FALLBACK_IDENTITY = """You are a small, careful, curious differential-drive robot exploring \
+indoors. Move smoothly, avoid obstacles, and remember what you see."""
+
+
+def find_persona(explicit_path: str = '') -> str | None:
+    """Locate the robot's CLAUDE.md.
+
+    Order: the persona_file parameter, $ROBOT_PERSONA_FILE, then CLAUDE.md in a parent
+    directory of this source file (works with colcon --symlink-install) or of the cwd.
+    """
+    candidates = [explicit_path, os.environ.get('ROBOT_PERSONA_FILE', '')]
+    for start in (os.path.dirname(os.path.realpath(__file__)), os.getcwd()):
+        d = start
+        while True:
+            candidates.append(os.path.join(d, 'CLAUDE.md'))
+            parent = os.path.dirname(d)
+            if parent == d:
+                break
+            d = parent
+    for c in candidates:
+        if c and os.path.isfile(os.path.expanduser(c)):
+            return os.path.expanduser(c)
+    return None
 
 
 class ClaudeAgentNode(Node):
@@ -83,6 +117,10 @@ class ClaudeAgentNode(Node):
         p('jpeg_quality', 75)
         p('history_length', 6)
         p('mission', 'Explore the area safely, heading for open space and avoiding obstacles.')
+        p('persona_file', '')
+        p('memory_file', '~/.ros/robot_memory/notes.jsonl')
+        p('memory_recall', 30)
+        p('memory_max_notes', 500)
 
         g = self.get_parameter
         self.model = g('model').value
@@ -98,8 +136,20 @@ class ClaudeAgentNode(Node):
         # Server-side refusal fallback is only accepted by these model families.
         self.use_fallback = bool(g('refusal_fallback').value) and self.model.startswith(
             ('claude-opus-5', 'claude-fable-5', 'claude-sonnet-5-5'))
-        self.system_prompt = SYSTEM_PROMPT.format(
+        persona_path = find_persona(g('persona_file').value)
+        if persona_path:
+            with open(persona_path, encoding='utf-8') as f:
+                identity = f.read()
+            self.get_logger().info(f'Loaded robot identity from {persona_path}')
+        else:
+            identity = FALLBACK_IDENTITY
+            self.get_logger().warn('CLAUDE.md not found: using a minimal built-in identity. '
+                                   'Set persona_file or build with --symlink-install.')
+        self.system_prompt = identity.strip() + '\n\n' + OPERATING_RULES.format(
             period=self.period, horizon=self.period * 2.0, mission=g('mission').value)
+
+        self.memory = NoteStore(g('memory_file').value, int(g('memory_max_notes').value))
+        self.memory_recall = int(g('memory_recall').value)
 
         # Credentials come from ANTHROPIC_API_KEY (or an `ant auth login` profile).
         self._client = anthropic.Anthropic(
@@ -117,13 +167,16 @@ class ClaudeAgentNode(Node):
                                  qos_profile_sensor_data)
         self.create_subscription(String, '/perception/summary', self._summary_cb, 10)
         self._intent_pub = self.create_publisher(String, '/claude/intent', 10)
+        self._say_pub = self.create_publisher(String, '/claude/say', 10)
+        self._note_pub = self.create_publisher(String, '/claude/note', 10)
 
         self._stop_evt = threading.Event()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
         self.get_logger().info(
             f'Claude agent ready: model={self.model} effort={self.effort} '
-            f'period={self.period:.1f}s fallback={self.use_fallback}')
+            f'period={self.period:.1f}s fallback={self.use_fallback} '
+            f'memory={len(self.memory)} notes in {self.memory.path}')
 
     # ── Inputs ────────────────────────────────────────────────────────────────
 
@@ -171,6 +224,7 @@ class ClaudeAgentNode(Node):
             'sensors': summary,
             'camera': 'attached' if b64 else 'unavailable',
             'recent_decisions_oldest_first': list(self._history),
+            'memory_notes': self.memory.recent(self.memory_recall),
         }
         content.append({'type': 'text', 'text': json.dumps(state)})
 
@@ -187,14 +241,26 @@ class ClaudeAgentNode(Node):
             return
         text = next((b.text for b in response.content if b.type == 'text'), None)
         try:
-            decision = intent_mod.normalise(json.loads(text), self.min_dur, self.max_dur)
-        except (TypeError, ValueError) as e:
+            raw = json.loads(text)
+            decision = intent_mod.normalise(raw, self.min_dur, self.max_dur)
+            say, note = intent_mod.extras(raw)
+        except (TypeError, ValueError, AttributeError) as e:
             self.get_logger().warn(f'Unparseable decision ({e}), stop_reason='
                                    f'{response.stop_reason}: {text!r}')
             self._publish(intent_mod.stop_intent('unparseable decision'))
             return
 
         self._publish(decision)
+        if say:
+            self._say_pub.publish(String(data=say))
+            self.get_logger().info(f'Says: "{say}"')
+        if note:
+            try:
+                if self.memory.add(note):
+                    self._note_pub.publish(String(data=note))
+                    self.get_logger().info(f'Remembered: {note}')
+            except OSError as e:
+                self.get_logger().warn(f'Could not save note to {self.memory.path}: {e}')
         self._history.append({k: decision[k] for k in ('linear', 'angular', 'reason')})
         self.get_logger().info(
             f'[{latency:.1f}s] lin={decision["linear"]:+.2f} ang={decision["angular"]:+.2f} '

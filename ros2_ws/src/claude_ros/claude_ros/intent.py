@@ -1,9 +1,10 @@
 """The contract between the Claude agent and the motion controller.
 
 Claude answers with a JSON object matching ``DECISION_SCHEMA`` (enforced by the
-API's structured outputs). The agent publishes it on ``/claude/intent`` as a
-``std_msgs/String`` and the motion controller executes it smoothly until it
-expires or a newer one arrives.
+API's structured outputs). The motion part (linear, angular, duration_s, reason)
+is published on ``/claude/intent`` as a ``std_msgs/String`` and the motion
+controller executes it smoothly until it expires or a newer one arrives. ``say``
+goes to ``/claude/say`` and ``note`` into the robot's memory.
 """
 from __future__ import annotations
 
@@ -31,8 +32,16 @@ DECISION_SCHEMA = {
             'type': 'string',
             'description': 'One short sentence explaining the choice.',
         },
+        'say': {
+            'type': 'string',
+            'description': 'Something to say out loud to people nearby, or empty.',
+        },
+        'note': {
+            'type': 'string',
+            'description': 'A new observation worth remembering long term, or empty.',
+        },
     },
-    'required': ['linear', 'angular', 'duration_s', 'reason'],
+    'required': ['linear', 'angular', 'duration_s', 'reason', 'say', 'note'],
     'additionalProperties': False,
 }
 
@@ -54,6 +63,13 @@ def normalise(data: dict, min_duration: float, max_duration: float) -> dict:
                                             _finite(data.get('duration_s'), min_duration))),
         'reason': str(data.get('reason', ''))[:200],
     }
+
+
+def extras(data: dict) -> tuple:
+    """The non-motion parts of a decision: (say, note), each trimmed, '' when absent."""
+    def text(key, limit):
+        return ' '.join(str(data.get(key) or '').split())[:limit]
+    return text('say', 200), text('note', 300)
 
 
 def stop_intent(reason: str) -> dict:

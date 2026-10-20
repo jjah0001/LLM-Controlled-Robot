@@ -28,3 +28,8 @@ def test_schema_is_strict():
     s = intent.DECISION_SCHEMA
     assert s['additionalProperties'] is False
     assert set(s['required']) == set(s['properties'])
+
+
+def test_extras_trim_and_default():
+    assert intent.extras({'say': '  hello\n there ', 'note': None}) == ('hello there', '')
+    assert intent.extras({}) == ('', '')

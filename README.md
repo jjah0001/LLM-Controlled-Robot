@@ -5,8 +5,10 @@ ultrasonic sensor, asks Claude where to go, and drives with smooth, continuous m
 A 20 Hz local controller executes Claude's decisions with acceleration limits and an
 obstacle safety layer, so motion stays smooth and safe between API calls.
 
-See [CLAUDE.md](CLAUDE.md) for architecture, setup, tuning and hardware notes, and
-[`ros2_ws/src/claude_ros`](ros2_ws/src/claude_ros) for the nodes and topics.
+- [CLAUDE.md](CLAUDE.md) is the robot's identity (goals, hardware, senses, actions,
+  personality, communication, memory). It is loaded as Claude's system prompt.
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) covers architecture, setup, tuning and wiring.
+- [`ros2_ws/src/claude_ros`](ros2_ws/src/claude_ros) lists the nodes and topics.
 
 ```bash
 cd ros2_ws && vcs import src < robot.repos

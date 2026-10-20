@@ -6,9 +6,9 @@ keeps the motion smooth and safe between Claude's decisions.
 | Node | Rate | Role |
 |---|---|---|
 | `motion_controller_node` | 20 Hz | Fuses `/scan` (D05 dTOF LiDAR) and `ultrasonic/range`, executes the latest Claude intent with acceleration limits, slows/stops near obstacles, steers away from walls, publishes `/cmd_vel` and `/perception/summary`. |
-| `claude_agent_node` | ~0.5 Hz | Sends the camera frame + `/perception/summary` to Claude, publishes the decision on `/claude/intent`. |
+| `claude_agent_node` | ~0.5 Hz | Sends the camera frame, `/perception/summary` and memory notes to Claude with the repo's `CLAUDE.md` as the system prompt; publishes motion on `/claude/intent`, speech on `/claude/say`, and saves notes. |
 
-See the repository's `CLAUDE.md` for the full architecture, setup and tuning guide.
+See the repository's `docs/DEVELOPMENT.md` for the full architecture, setup and tuning guide.
 
 ## Quick start
 
@@ -32,11 +32,14 @@ Launch arguments: `use_lidar`, `use_camera`, `use_agent` (true/false), `lidar_po
 | `ultrasonic/range` | `sensor_msgs/Range` | in (ultrasonic_control) |
 | `/camera/image_raw` | `sensor_msgs/Image` | in (camera_ros) |
 | `/claude/intent` | `std_msgs/String` (JSON) | agent → controller |
+| `/claude/say` | `std_msgs/String` | agent → (a text-to-speech node) |
+| `/claude/note` | `std_msgs/String` | agent → (each new memory note) |
 | `/perception/summary` | `std_msgs/String` (JSON) | controller → agent |
 | `/cmd_vel` | `geometry_msgs/Twist` | controller → motor_driver |
 
 ## Changing the behaviour
 
-Set `mission` in `config/robot.yaml` or on the command line
-(`mission:="Follow the person in front of you"`). The decision schema in `intent.py` is the
-contract with the controller; change both sides together.
+Edit the repository's `CLAUDE.md` to change who the robot is (personality, goals, how it
+speaks and what it remembers). Set the current task with `mission` in `config/robot.yaml` or
+on the command line (`mission:="Follow the person in front of you"`). The decision schema in
+`intent.py` is the contract with the controller; change both sides together.
