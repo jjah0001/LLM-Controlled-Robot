@@ -29,7 +29,7 @@ import cv2
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
@@ -48,9 +48,13 @@ message with:
 metres from the robot centre. front_clearance_m / rear_clearance_m = free space between the \
 bumper and the nearest obstacle in the straight-line path (null = nothing seen). ultrasonic_m \
 ("clear" = nothing in range). controller_flags = what the safety layer is doing \
-(blocked_front, slowing_front, emergency_stop_front, steering_away_from_wall, ...). \
-active_intent = the motion you chose last time and how long it has left.
-- recent_decisions_oldest_first: your last few decisions.
+(blocked_front, slowing_front, emergency_stop_front, steering_away_from_wall, edge_front, \
+emergency_stop_edge, ...). edge_sensor = the downward drop sensor: "floor_ok", "drop_ahead" \
+(no floor in front: stairs or a ledge), "sensor_stale" or "not_fitted" (then only your camera \
+can spot drops). active_intent = the motion you chose last time and how long it has left.
+- motor_power: the motors' current floor mode and PWM duty range.
+- recent_decisions_oldest_first: your last few decisions, each with the front clearance at the \
+time. If you kept asking to move but the distances stayed the same, you are probably stalled.
 - memory_notes: notes you saved earlier, oldest first.
 
 Answer with one decision:
@@ -62,11 +66,20 @@ continuous; use less for tentative moves.
 - reason: one short sentence, for the logs.
 - say: words to speak to people nearby, or "" (most of the time).
 - note: a new fact worth remembering for later, or "". Don't repeat notes you already have.
+- floor: "carpet" or "hard_floor" to change the motor power mode, or "" to keep it. \
+motor_power shows the current mode.
 
 The motion controller ramps speed, slows near obstacles and stops on its own, so you choose \
 direction and pace, not low-level safety. If front_clearance_m is under about 0.4 m or the \
 front is blocked, rotate in place (linear 0) toward the most open sector rather than pushing \
 forward. Reverse only when boxed in. If the sensors or image look unreliable, go slowly or stop.
+
+Edges: the LiDAR and front ultrasonic look straight ahead and cannot see a drop. If edge_sensor \
+is "drop_ahead" or a controller flag mentions an edge, back away slowly (linear about -0.3) \
+and turn away; never try forward again there. If you see stairs, a step down, a ledge or the \
+edge of a table or platform in the image, stay well away (at least half a metre) and note it. \
+If edge_sensor is "not_fitted" and there is no camera image, move only slowly (linear 0.3 or \
+less) and only over floor you have already crossed.
 
 Current mission: {mission}
 """
@@ -161,6 +174,7 @@ class ClaudeAgentNode(Node):
         self._image_t = -1e9
         self._summary = None
         self._summary_t = -1e9
+        self._motor_power = None
         self._history = collections.deque(maxlen=int(g('history_length').value))
 
         self.create_subscription(Image, g('image_topic').value, self._image_cb,
@@ -168,6 +182,9 @@ class ClaudeAgentNode(Node):
         self.create_subscription(String, '/perception/summary', self._summary_cb, 10)
         self._intent_pub = self.create_publisher(String, '/claude/intent', 10)
         self._say_pub = self.create_publisher(String, '/claude/say', 10)
+        self._surface_pub = self.create_publisher(String, '/motor_driver/surface', 10)
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(String, '/motor_driver/power', self._power_cb, latched)
         self._note_pub = self.create_publisher(String, '/claude/note', 10)
 
         self._stop_evt = threading.Event()
@@ -183,6 +200,12 @@ class ClaudeAgentNode(Node):
     def _image_cb(self, msg: Image):
         with self._lock:
             self._image, self._image_t = msg, time.monotonic()
+
+    def _power_cb(self, msg: String):
+        try:
+            self._motor_power = json.loads(msg.data)
+        except json.JSONDecodeError:
+            pass
 
     def _summary_cb(self, msg: String):
         try:
@@ -222,6 +245,7 @@ class ClaudeAgentNode(Node):
                 'type': 'base64', 'media_type': 'image/jpeg', 'data': b64}})
         state = {
             'sensors': summary,
+            'motor_power': self._motor_power or 'unknown',
             'camera': 'attached' if b64 else 'unavailable',
             'recent_decisions_oldest_first': list(self._history),
             'memory_notes': self.memory.recent(self.memory_recall),
@@ -251,6 +275,11 @@ class ClaudeAgentNode(Node):
             return
 
         self._publish(decision)
+        floor = raw.get('floor') if isinstance(raw, dict) else None
+        current = (self._motor_power or {}).get('surface')
+        if floor in ('hard_floor', 'carpet') and floor != current:
+            self._surface_pub.publish(String(data=floor))
+            self.get_logger().info(f'Switching motor power to {floor} mode')
         if say:
             self._say_pub.publish(String(data=say))
             self.get_logger().info(f'Says: "{say}"')
@@ -261,7 +290,9 @@ class ClaudeAgentNode(Node):
                     self.get_logger().info(f'Remembered: {note}')
             except OSError as e:
                 self.get_logger().warn(f'Could not save note to {self.memory.path}: {e}')
-        self._history.append({k: decision[k] for k in ('linear', 'angular', 'reason')})
+        entry = {k: decision[k] for k in ('linear', 'angular', 'reason')}
+        entry['front_clearance_m_at_decision'] = summary.get('front_clearance_m')
+        self._history.append(entry)
         self.get_logger().info(
             f'[{latency:.1f}s] lin={decision["linear"]:+.2f} ang={decision["angular"]:+.2f} '
             f'for {decision["duration_s"]:.1f}s | {decision["reason"]}')

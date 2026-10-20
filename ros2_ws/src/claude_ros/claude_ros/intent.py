@@ -4,7 +4,8 @@ Claude answers with a JSON object matching ``DECISION_SCHEMA`` (enforced by the
 API's structured outputs). The motion part (linear, angular, duration_s, reason)
 is published on ``/claude/intent`` as a ``std_msgs/String`` and the motion
 controller executes it smoothly until it expires or a newer one arrives. ``say``
-goes to ``/claude/say`` and ``note`` into the robot's memory.
+goes to ``/claude/say``, ``note`` into the robot's memory, and ``floor`` switches
+the motor driver's power mode (``/motor_driver/surface``).
 """
 from __future__ import annotations
 
@@ -40,8 +41,13 @@ DECISION_SCHEMA = {
             'type': 'string',
             'description': 'A new observation worth remembering long term, or empty.',
         },
+        'floor': {
+            'type': 'string',
+            'enum': ['', 'hard_floor', 'carpet'],
+            'description': 'Switch motor power for this floor type, or empty to keep it.',
+        },
     },
-    'required': ['linear', 'angular', 'duration_s', 'reason', 'say', 'note'],
+    'required': ['linear', 'angular', 'duration_s', 'reason', 'say', 'note', 'floor'],
     'additionalProperties': False,
 }
 

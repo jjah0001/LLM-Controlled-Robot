@@ -24,6 +24,7 @@ latency); a local controller runs at 20 Hz and owns smoothness and safety.
 ```
  /scan (LaserScan, m1ct_d2) ─────┐
  ultrasonic/range (Range) ───────┤
+ edge/range (Range, optional) ───┤
                                  ▼
                   motion_controller_node (20 Hz)  ──► /cmd_vel ──► motor_driver_node ──► L298N
                    fuse sensors, ramp velocity,         (Twist)     twist→wheel PWM,
@@ -106,8 +107,10 @@ Most important on a new robot:
 1. **LiDAR orientation**: `lidar_yaw_offset_deg` / `lidar_reverse`. Put a box in front and check
    `lidar_sectors_m.front` drops; put it on the left and check `left` drops.
 2. **Footprint**: `lidar_to_front_m`, `lidar_to_rear_m`, `robot_half_width_m`.
-3. **Motors**: `max_wheel_speed_mps` (measure), `track_width_m`, `min_duty` (lowest duty that
-   still turns the wheels), `invert_left` / `invert_right`.
+3. **Motors**: `max_wheel_speed_mps` (measure), `track_width_m`, `invert_left` /
+   `invert_right`, and motor power: `hard_floor_min_duty` / `carpet_min_duty` (lowest duty that
+   still turns the wheels on each surface), `surface`, `max_duty`. See the README's
+   "Motor power" section; all of these can be changed live with `ros2 param set`.
 4. **Agent**: `model` (default `claude-opus-5-5`; `claude-haiku-5-5` for lower latency/cost),
    `effort`, `decision_period_s`, `mission`, `persona_file`, `memory_file`, `memory_recall`.
 5. **Personality**: edit the repo-root `CLAUDE.md`; restart the agent to apply.
@@ -115,9 +118,10 @@ Most important on a new robot:
 ## Hardware facts
 
 - BCM pins: L298N IN1=17, IN2=22, ENA=18 (left), IN3=23, IN4=24, ENB=19 (right);
-  HC-SR04 TRIG=4, ECHO=27 (ECHO is 5 V: use a divider to 3.3 V).
+  HC-SR04 TRIG=4, ECHO=27 (ECHO is 5 V: use a divider to 3.3 V); optional downward edge
+  HC-SR04 TRIG=5, ECHO=6 (same divider), enabled with `use_edge_sensor:=true`.
 - LiDAR on `/dev/ttyUSB0` @ 230400; install `sc_mini.rules` from the driver repo for permissions.
-- On a Pi 5, `RPi.GPIO` does not work: install `python3-rpi-lgpio` (drop-in replacement).
+- The robot uses a Raspberry Pi 4 (`RPi.GPIO` works; on a Pi 5 you would need `python3-rpi-lgpio`).
 
 ## Gotchas
 
@@ -126,6 +130,18 @@ Most important on a new robot:
   it to `lidar` and passes parameters from `robot.yaml`; `perception.scan_to_polar` drops the zeros.
 - The ultrasonic follows REP 117: `+inf` = nothing in range. A silent topic means a faulty sensor.
 - `/cmd_vel` must have exactly one publisher while driving (the motion controller).
+- Edges: the LiDAR plane and the front ultrasonic cannot see a drop. With the edge sensor
+  enabled, `control.step` zeroes forward speed immediately (no ramp) when
+  `perception.edge_ahead` is true, which includes a stale sensor (fail-safe). Reversing and
+  turning in place stay allowed so Scout can back away. Without the sensor, only Claude's
+  camera can spot stairs.
+- Motor start kick: `kick_s` > 0 gives a `kick_duty` burst when a wheel starts or reverses
+  (`kinematics.StartKick`). The watchdog re-applies the last command every 0.1 s so it ends on
+  time.
+- Motor power: `motor_driver_node` validates live parameter changes (`surface`,
+  `*_min_duty`, `min_duty`, `max_duty`) and publishes the active setting latched on
+  `/motor_driver/power`. Scout can request a surface via the decision's `floor` field, which
+  the agent publishes on `/motor_driver/surface`.
 - Claude API: Python `anthropic` SDK, structured outputs, `fallbacks: "default"` with the
   `server-side-fallback-2026-07-01` beta on models that support it. Handle `stop_reason ==
   "refusal"` and API errors by publishing a stop intent; never block the ROS executor on the API.

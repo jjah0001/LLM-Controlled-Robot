@@ -18,6 +18,11 @@ motion_controller:
     robot_half_width_m: 0.10
     corridor_margin_m: 0.05
     ultrasonic_to_front_m: 0.0    # ultrasonic face -> front bumper (0 if flush)
+    # Edge (drop) sensor, a second HC-SR04 at the front bumper pointing at the floor.
+    # Turn it on with the launch argument use_edge_sensor:=true. Forward motion stops when
+    # it reads further than edge_max_floor_m, gets no echo, or goes silent.
+    edge_max_floor_m: 0.10        # set to (sensor height above the floor) + about 0.04 m
+    edge_timeout_s: 0.5
     # Motion envelope
     max_linear: 0.25              # m/s
     max_angular: 1.2              # rad/s
@@ -56,9 +61,17 @@ motor_driver:
   ros__parameters:
     max_wheel_speed_mps: 0.30     # wheel speed at 100% duty; calibrate on the floor
     track_width_m: 0.16           # distance between the two wheels
-    min_duty: 60.0                # % duty below which the motors stall (old code used 60; lower it if your motors start lower, for gentler starts)
+    # Motor power (PWM duty %). Wheel commands map onto min_duty..max_duty, so min_duty is
+    # the power at the slowest speed. Raise it if the wheels stall (e.g. on carpet).
+    # Change live:  ros2 param set /motor_driver surface carpet
+    surface: hard_floor           # hard_floor | carpet (Scout can also switch this itself)
+    hard_floor_min_duty: 60.0
+    carpet_min_duty: 80.0
+    min_duty: -1.0                # >= 0 overrides both presets
     max_duty: 100.0
     deadband: 0.02                # wheel commands below this fraction -> motor off
+    kick_duty: 100.0              # % duty for a short burst when a wheel starts or reverses
+    kick_s: 0.0                   # burst length in s; 0 = off (carpet: try 0.15-0.3)
     pwm_hz: 1000.0
     cmd_timeout_s: 0.5
     invert_left: false
@@ -69,15 +82,27 @@ ultrasonic_publisher:
     rate_hz: 15.0
     timeout_s: 0.025
 
-camera:
+edge_sensor:                    # optional downward HC-SR04 (use_edge_sensor:=true)
   ros__parameters:
+    trig_pin: 5                   # BCM
+    echo_pin: 6                   # BCM, through a 5V -> 3.3V divider like the front sensor
+    frame_id: edge_sensor_link
+    rate_hz: 15.0
+    timeout_s: 0.025
+    max_range: 1.0
+
+camera:                         # camera_ros; setup steps in the README ("RPi Camera setup")
+  ros__parameters:
+    camera: 0                     # first camera libcamera finds (`cam -l` lists them)
     width: 640
     height: 480
     format: RGB888
+    orientation: 0                # 180 if the camera is mounted upside down
+    # sensor_mode: "1640:1232"    # Camera Module 2: full field of view instead of a crop
 
-lidar:
+lidar:                          # m1ct_d2; setup steps in the README ("LiDAR setup")
   ros__parameters:
-    port: /dev/ttyUSB0
+    port: /dev/ttyUSB0            # the launch argument lidar_port overrides this
     baudrate: 230400
     frame_id: laser_link
     version: 4
