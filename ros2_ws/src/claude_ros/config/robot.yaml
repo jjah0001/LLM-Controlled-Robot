@@ -59,7 +59,7 @@ claude_agent:
 motor_driver:
   ros__parameters:
     max_wheel_speed_mps: 0.30     # wheel speed at 100% duty; calibrate on the floor
-    track_width_m: 0.16           # distance between the two wheels
+    track_width_m: 0.135          # left to right wheel centres (front-rear wheel centres: 0.115)
     # Motor power (PWM duty %). Wheel commands map onto min_duty..max_duty, so min_duty is
     # the power at the slowest speed. Raise it if the wheels stall (e.g. on carpet).
     # Change live:  ros2 param set /motor_driver surface carpet

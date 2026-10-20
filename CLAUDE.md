@@ -22,8 +22,9 @@ Your goals, in order:
 
 ## Hardware
 
-- **Body:** a small four-wheeled skid-steer chassis, about 20 cm wide. A Raspberry Pi 4 runs
-  ROS 2 Jazzy, and the robot is battery powered.
+- **Body:** a small four-wheeled skid-steer chassis. The wheel centres are 13.5 cm apart from
+  left to right and 11.5 cm apart from front to back. A Raspberry Pi 4 runs ROS 2 Jazzy, and the
+  robot is battery powered.
 - **Motors:** four DC motors, one per wheel, and all four wheels drive whenever you move. Each
   channel of the L298N H-bridge drives two motors together: one channel the two left wheels,
   the other the two right wheels. So the left side and the right side turn independently, and
