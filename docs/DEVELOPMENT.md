@@ -50,7 +50,10 @@ latency); a local controller runs at 20 Hz and owns smoothness and safety.
   Delete that file to make the robot forget.
 - An intent holds for `duration_s`, so motion continues between decisions. When it expires
   (API down, slow, refused) the controller ramps smoothly to a stop.
-- Safety lives only in `claude_ros/control.py`; prompts are not a safety mechanism.
+- Safety lives only in `claude_ros/control.py`; prompts are not a safety mechanism. That
+  includes edges: with `use_cliff:=true` the controller blocks travel toward a drop seen on
+  `/cliff`, and blocks all travel if `/cliff` goes silent. Without edge sensors nothing in the
+  safety layer can detect a drop (the LiDAR and ultrasonic look straight ahead).
 
 ## Packages
 
@@ -58,12 +61,13 @@ latency); a local controller runs at 20 Hz and owns smoothness and safety.
 |---|---|---|
 | `claude_ros` | `claude_agent_node`, `motion_controller_node` | The brain + local controller. Launch files and `config/robot.yaml` live here. |
 | `motor_driver` | `motor_driver_node`, `keyboard_controller` | L298N driver on `/cmd_vel`; keyboard teleop for testing. |
-| `ultrasonic_control` | `ultrasonic_publisher`, `motor_driver` (legacy) | Publishes `ultrasonic/range`. The legacy `motor_driver` here is an old drive-until-obstacle demo; **never run it alongside `motor_driver_node`** (same GPIO pins). |
+| `ultrasonic_control` | `ultrasonic_publisher`, `cliff_publisher`, `motor_driver` (legacy) | Publishes `ultrasonic/range` and the IR edge sensors on `/cliff` (`use_cliff:=true`). The legacy `motor_driver` here is an old drive-until-obstacle demo; **never run it alongside `motor_driver_node`** (same GPIO pins). |
 | `py_hello_world` | `hello_pub`, `hello_sub` | ROS tutorial, unused by the robot. |
 
 Pure logic is kept free of ROS imports so it unit-tests anywhere:
 `claude_ros/perception.py` (scan → sectors/clearances, sensor fusion),
-`claude_ros/control.py` (ramping, speed caps, avoidance, e-stop),
+`claude_ros/control.py` (ramping, speed caps, avoidance, e-stop, edges),
+`ultrasonic_control/cliff.py` (edge sensor debounce),
 `claude_ros/intent.py` (schema + validation), `claude_ros/memory.py` (note store),
 `motor_driver/kinematics.py` (twist → wheel duty).
 Put new logic there and keep the `*_node.py` files as thin ROS wiring.
@@ -91,6 +95,7 @@ Tests (no ROS or Pi needed):
 ```bash
 cd ros2_ws/src/claude_ros && python3 -m pytest -q test/
 cd ros2_ws/src/motor_driver && python3 -m pytest -q test/test_wheels.py
+cd ros2_ws/src/ultrasonic_control && python3 -m pytest -q test/test_cliff.py
 ```
 
 Useful checks on the robot:
@@ -118,7 +123,8 @@ Most important on a new robot:
 ## Hardware facts
 
 - BCM pins: L298N IN1=17, IN2=22, ENA=18 (left), IN3=23, IN4=24, ENB=19 (right);
-  HC-SR04 TRIG=4, ECHO=27 (ECHO is 5 V: use a divider to 3.3 V).
+  HC-SR04 TRIG=4, ECHO=27 (ECHO is 5 V: use a divider to 3.3 V);
+  IR edge sensors front_left=5, front_right=6 (3.3 V powered, `cliff_publisher`).
 - LiDAR on `/dev/ttyUSB0` @ 230400; install `sc_mini.rules` from the driver repo for permissions
   (README, "LiDAR").
 - RPi Camera via `camera_ros`, which needs Raspberry Pi's libcamera fork on Ubuntu

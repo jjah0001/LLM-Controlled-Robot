@@ -68,3 +68,28 @@ def test_steers_away_from_close_right_wall():
     p = c.Perception(front=None, side_right=0.03, front_known=True)
     state, _ = _run(intent, p, 2.0)
     assert state.angular > 0.0
+
+
+def test_cliff_ahead_stops_at_once_but_allows_turning_and_reversing():
+    moving = c.ControllerState(linear=LIM.max_linear)
+    edge = c.Perception(front_known=True, rear_known=True, cliff_front=True)
+    state = c.step(moving, c.Intent(linear=1.0, expires_at=100.0), edge, LIM, 1.0, 0.05)
+    assert state.linear == 0.0
+    assert 'emergency_stop_cliff_front' in state.flags and 'cliff_front' in state.flags
+    state, _ = _run(c.Intent(angular=1.0, expires_at=100.0), edge, 2.0)
+    assert state.linear == 0.0 and abs(state.angular - LIM.max_turn_while_blocked) < 1e-9
+    state, _ = _run(c.Intent(linear=-1.0, expires_at=100.0), edge, 2.0)
+    assert state.linear < 0.0
+
+
+def test_cliff_behind_blocks_reversing():
+    edge = c.Perception(front_known=True, rear_known=True, cliff_rear=True)
+    state, _ = _run(c.Intent(linear=-1.0, expires_at=100.0), edge, 1.0)
+    assert state.linear == 0.0 and 'cliff_rear' in state.flags
+
+
+def test_silent_cliff_sensors_block_travel():
+    blind = c.Perception(front_known=True, rear_known=True, cliff_known=False)
+    for linear in (1.0, -1.0):
+        state, _ = _run(c.Intent(linear=linear, expires_at=100.0), blind, 1.0)
+        assert state.linear == 0.0 and 'no_cliff_sensor' in state.flags

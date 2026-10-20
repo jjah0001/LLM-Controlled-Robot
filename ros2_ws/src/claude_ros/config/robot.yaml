@@ -8,6 +8,10 @@ motion_controller:
     scan_timeout_s: 0.6
     ultrasonic_timeout_s: 0.5
     max_intent_duration_s: 6.0
+    # Edge (cliff) sensors: the launch argument use_cliff:=true turns this on and starts
+    # cliff_publisher. When on, the robot does not travel unless /cliff is fresh and clear.
+    use_cliff_sensors: false
+    cliff_timeout_s: 0.3
     # LiDAR mounting. Check with: ros2 topic echo /perception/summary
     # (hold a box in front of the robot: lidar_sectors_m.front must drop).
     lidar_yaw_offset_deg: 0.0     # rotate the scan so 0 deg is straight ahead
@@ -73,6 +77,14 @@ ultrasonic_publisher:
   ros__parameters:
     rate_hz: 15.0
     timeout_s: 0.025
+
+cliff_publisher:                # downward IR edge sensors; setup in the repo README ("Edges")
+  ros__parameters:
+    sensor_names: [front_left, front_right]   # must start with "front" or "rear"
+    sensor_pins: [5, 6]           # BCM pins, same order as sensor_names
+    drop_level: 1                 # GPIO level meaning "no floor" (1 for TCRT5000/FC-51 modules)
+    rate_hz: 50.0
+    clear_count: 3                # floor readings in a row before an edge counts as gone
 
 camera:                         # camera_ros; setup steps in the repo README ("RPi Camera")
   ros__parameters:

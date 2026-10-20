@@ -17,9 +17,10 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ros2 launch claude_ros robot.launch.py
 ```
 
-Each sensor is optional: `use_lidar:=false`, `use_camera:=false` and `use_agent:=false` turn
-parts off, so you can bring the robot up one piece at a time. Without the camera, Claude still
-navigates using the LiDAR and ultrasonic distances.
+Each part is optional: `use_lidar:=false`, `use_camera:=false` and `use_agent:=false` turn
+parts off, so you can bring the robot up one piece at a time, and `use_cliff:=true` turns on
+the edge sensors (see "Edges"). Without the camera, Claude still navigates using the LiDAR and
+ultrasonic distances.
 
 All commands below run on the Pi (Ubuntu 24.04, ROS 2 Jazzy), from `ros2_ws/`, with
 `source /opt/ros/jazzy/setup.bash` done first. Settings live in
@@ -142,6 +143,53 @@ example, only works with Raspberry Pi's fork). Full Pi camera support on this ro
 
 The agent reads `/camera/image_raw`. If no frame newer than `image_timeout_s` is available,
 it tells Claude the camera is unavailable and decides from the distances alone.
+
+## Edges (stairs, table tops)
+
+The LiDAR and ultrasonic look straight ahead, so **they cannot see a drop**. A floor that ends
+looks like open space to them. Software alone can't fix that. Without extra sensors, the only
+protection is Claude watching the camera (it is told to keep at least 0.5 m from any edge it
+sees), and that isn't reliable enough to count on. **Fit downward-facing IR edge sensors**
+before letting the robot drive near stairs or on a table.
+
+**Parts:** two digital IR reflectance modules (TCRT5000 boards, a few dollars each, with a
+digital `DO`/`OUT` pin and a sensitivity potentiometer).
+
+**Mounting:** one under each front corner, pointing straight down, about 5-10 mm above the
+floor and **at least 5 cm in front of the wheels**. The robot needs that much room to stop.
+Add a third one at the back (named e.g. `rear`) if the robot often reverses.
+
+**Wiring** (power the modules from 3.3 V so their output is safe for the Pi's GPIO; any 3.3 V
+and GND header pins will do):
+
+| Module pin | front_left | front_right |
+|---|---|---|
+| VCC | 3.3 V (pin 1) | 3.3 V (pin 17) |
+| GND | GND (pin 9) | GND (pin 25) |
+| DO / OUT | GPIO5 (pin 29) | GPIO6 (pin 31) |
+
+**Set up and test:**
+1. With the robot on the floor, turn each module's potentiometer until its LED is on. Then lift
+   the robot about 3 cm: the LED must go off. Check this on your darkest floor or carpet too,
+   since dark surfaces reflect less IR.
+2. Start the robot with the edge sensors on:
+   ```bash
+   ros2 launch claude_ros robot.launch.py use_cliff:=true
+   ros2 topic echo /cliff          # second terminal: lift the front, "front" must become true
+   ```
+3. Bench test: push the robot slowly toward a table edge by hand (agent off:
+   `use_agent:=false`) and check it stops while its front wheels are still well on the table.
+
+**What the robot does:**
+- **Edge ahead:** forward travel stops immediately, without the usual gentle slow-down. The
+  robot may still turn in place or back away, and Claude is told to back off and turn away.
+- **Sensors silent:** with `use_cliff:=true`, the robot will not drive forward or backward
+  until `/cliff` is publishing again.
+- **Loose wire:** reads as an edge, so the robot stops.
+
+Pins, the "no floor" level and the debounce are under `cliff_publisher:` in `robot.yaml`. To
+always use the sensors, change the `use_cliff` default to `'true'` in
+`ros2_ws/src/claude_ros/launch/robot.launch.py`.
 
 ## Motor power (carpet, rugs)
 

@@ -4,6 +4,7 @@
     ros2 launch claude_ros robot.launch.py use_agent:=false   # sensors + controller only
     ros2 launch claude_ros robot.launch.py mission:="Find the red ball" model:=claude-haiku-5-5
     ros2 launch claude_ros robot.launch.py min_duty:=80 kick_s:=0.25     # more power (carpet)
+    ros2 launch claude_ros robot.launch.py use_cliff:=true               # edge sensors fitted
 
 Optional hardware packages (m1ct_d2 LiDAR driver, camera_ros) are skipped with a
 warning when they are not installed, so the rest of the stack still starts.
@@ -55,13 +56,21 @@ def _setup(context):
             actions.append(LogInfo(msg='[robot.launch] camera_ros not found: camera skipped.'))
 
     motor_overrides = {k: float(arg(k)) for k in MOTOR_ARGS if arg(k)}
+    use_cliff = _truthy(arg('use_cliff'))
+    if use_cliff:
+        actions.append(Node(package='ultrasonic_control', executable='cliff_publisher',
+                            name='cliff_publisher', output='screen', parameters=[params]))
+    else:
+        actions.append(LogInfo(msg='[robot.launch] use_cliff:=false: edges (stairs, table '
+                                   'edges) are NOT detected. See the README, "Edges".'))
     actions += [
         Node(package='ultrasonic_control', executable='ultrasonic_publisher',
              name='ultrasonic_publisher', output='screen', parameters=[params]),
         Node(package='motor_driver', executable='motor_driver_node',
              name='motor_driver', output='screen', parameters=[params, motor_overrides]),
         Node(package='claude_ros', executable='motion_controller_node',
-             name='motion_controller', output='screen', parameters=[params]),
+             name='motion_controller', output='screen',
+             parameters=[params, {'use_cliff_sensors': use_cliff}]),
     ]
 
     if _truthy(arg('use_agent')):
@@ -80,6 +89,8 @@ def generate_launch_description():
         DeclareLaunchArgument('use_lidar', default_value='true'),
         DeclareLaunchArgument('use_camera', default_value='true'),
         DeclareLaunchArgument('use_agent', default_value='true'),
+        DeclareLaunchArgument('use_cliff', default_value='false',
+                              description='Start the IR edge sensors and require them to drive'),
         DeclareLaunchArgument('lidar_port', default_value='/dev/ttyUSB0'),
         DeclareLaunchArgument('model', default_value='',
                               description='Override the Claude model ID from robot.yaml'),

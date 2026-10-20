@@ -4,10 +4,12 @@ Pure Python so the behaviour can be unit tested without ROS or hardware.
 
 Pipeline each control tick (default 20 Hz):
   1. target   = latest intent (or zero once it has expired)
-  2. limit    = slow down in proportion to the free space ahead/behind, stop inside stop_distance
+  2. limit    = slow down in proportion to the free space ahead/behind, stop inside stop_distance,
+                and never travel toward an edge (drop) seen by the cliff sensors
   3. steer    = add a small bias away from walls that are close beside the robot
   4. ramp     = move the commanded velocity toward the target under acceleration limits
   5. e-stop   = bypass the ramp and zero forward/backward speed inside hard_stop_distance
+                or as soon as a cliff sensor sees an edge in the direction of travel
 """
 from __future__ import annotations
 
@@ -46,6 +48,9 @@ class Perception:
     side_right: float | None = None
     front_known: bool = False        # True when at least one fresh forward sensor exists
     rear_known: bool = False
+    cliff_front: bool = False        # a cliff sensor sees an edge (drop) ahead
+    cliff_rear: bool = False         # a cliff sensor sees an edge behind
+    cliff_known: bool = True         # False when cliff sensors are enabled but silent
 
 
 @dataclass
@@ -120,8 +125,24 @@ def step(state: ControllerState, intent: Intent, p: Perception, limits: ControlL
             flags.append('blocked_rear' if cap == 0.0 else 'slowing_rear')
         v_target = max(v_target, -cap)
 
-    if v_target == 0.0 and abs(w_target) > limits.max_turn_while_blocked and \
-            p.front is not None and p.front < limits.stop_distance:
+    # Edges: no travel toward a drop, and no travel at all if the cliff sensors are silent.
+    # Turning in place stays allowed (the wheels don't move), and so does backing away.
+    edge_ahead = p.cliff_front or not p.cliff_known
+    edge_behind = p.cliff_rear or not p.cliff_known
+    if v_target != 0.0 and not p.cliff_known:
+        flags.append('no_cliff_sensor')
+    if v_target > 0.0 and edge_ahead:
+        v_target = 0.0
+        if p.cliff_front:
+            flags.append('cliff_front')
+    elif v_target < 0.0 and edge_behind:
+        v_target = 0.0
+        if p.cliff_rear:
+            flags.append('cliff_rear')
+
+    near_edge = p.cliff_front or p.cliff_rear
+    if v_target == 0.0 and abs(w_target) > limits.max_turn_while_blocked and (
+            near_edge or (p.front is not None and p.front < limits.stop_distance)):
         w_target = math.copysign(limits.max_turn_while_blocked, w_target)
 
     # 3. Steering bias away from close side walls while moving forward.
@@ -142,5 +163,11 @@ def step(state: ControllerState, intent: Intent, p: Perception, limits: ControlL
     if v < 0.0 and p.rear is not None and p.rear <= limits.hard_stop_distance:
         v = 0.0
         flags.append('emergency_stop_rear')
+    if v > 0.0 and edge_ahead:
+        v = 0.0
+        flags.append('emergency_stop_cliff_front')
+    if v < 0.0 and edge_behind:
+        v = 0.0
+        flags.append('emergency_stop_cliff_rear')
 
     return ControllerState(linear=v, angular=w, flags=flags)

@@ -3,7 +3,7 @@
 <package format="3">
   <name>ultrasonic_control</name>
   <version>0.0.1</version>
-  <description>Front HC-SR04 ultrasonic range publisher (plus a legacy drive-until-obstacle demo).</description>
+  <description>Front HC-SR04 ultrasonic range and IR edge (cliff) sensor publishers (plus a legacy drive-until-obstacle demo).</description>
   <maintainer email="jeffrey.jahja7@gmail.com">jeffrey</maintainer>
   <license>MIT</license>
 

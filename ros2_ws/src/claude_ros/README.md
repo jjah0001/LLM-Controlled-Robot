@@ -22,8 +22,8 @@ ros2 launch claude_ros robot.launch.py
 ```
 
 Launch arguments: `use_lidar`, `use_camera`, `use_agent` (true/false), `lidar_port`,
-`model`, `mission`, `params_file`, and the motor power overrides `min_duty`, `max_duty`,
-`kick_duty`, `kick_s`. LiDAR, camera and motor-power setup are in the repository README.
+`use_cliff` (IR edge sensors, default false), `model`, `mission`, `params_file`, and the motor power overrides `min_duty`, `max_duty`,
+`kick_duty`, `kick_s`. LiDAR, camera, edge-sensor and motor-power setup are in the repository README.
 
 ## Topics
 
@@ -32,6 +32,7 @@ Launch arguments: `use_lidar`, `use_camera`, `use_agent` (true/false), `lidar_po
 | `/scan` | `sensor_msgs/LaserScan` | in (m1ct_d2) |
 | `ultrasonic/range` | `sensor_msgs/Range` | in (ultrasonic_control) |
 | `/camera/image_raw` | `sensor_msgs/Image` | in (camera_ros) |
+| `/cliff` | `std_msgs/String` (JSON) | in (cliff_publisher, with `use_cliff:=true`) |
 | `/claude/intent` | `std_msgs/String` (JSON) | agent → controller |
 | `/claude/say` | `std_msgs/String` | agent → (a text-to-speech node) |
 | `/claude/note` | `std_msgs/String` | agent → (each new memory note) |

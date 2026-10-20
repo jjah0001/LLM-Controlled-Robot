@@ -47,8 +47,10 @@ message with:
 45 degree sector (front, front_left, left, back_left, back, back_right, right, front_right), \
 metres from the robot centre. front_clearance_m / rear_clearance_m = free space between the \
 bumper and the nearest obstacle in the straight-line path (null = nothing seen). ultrasonic_m \
-("clear" = nothing in range). controller_flags = what the safety layer is doing \
-(blocked_front, slowing_front, emergency_stop_front, steering_away_from_wall, ...). \
+("clear" = nothing in range). cliff = the downward edge sensors (edge_ahead / edge_behind \
+true = the floor ends there), or a note that none are installed. controller_flags = what \
+the safety layer is doing (blocked_front, slowing_front, emergency_stop_front, cliff_front, \
+steering_away_from_wall, ...). \
 active_intent = the motion you chose last time and how long it has left.
 - recent_decisions_oldest_first: your last few decisions.
 - memory_notes: notes you saved earlier, oldest first.
@@ -67,6 +69,13 @@ The motion controller ramps speed, slows near obstacles and stops on its own, so
 direction and pace, not low-level safety. If front_clearance_m is under about 0.4 m or the \
 front is blocked, rotate in place (linear 0) toward the most open sector rather than pushing \
 forward. Reverse only when boxed in. If the sensors or image look unreliable, go slowly or stop.
+
+Edges: falling is the worst thing that can happen to you, and the LiDAR and ultrasonic cannot \
+see drops (they look straight ahead, not down). If cliff.edge_ahead is true or the flags show \
+cliff_front, back away slowly (linear about -0.3 for about 1 s), then turn away from the edge. \
+Watch every camera frame for the floor ending: stair tops, the edge of a table or platform, a \
+step down, a gap or a hole. If you see one, or you can't see floor ahead, turn away and keep \
+well clear (at least 0.5 m); approach unknown floor slowly.
 
 Current mission: {mission}
 """
