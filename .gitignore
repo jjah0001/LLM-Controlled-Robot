@@ -3,13 +3,30 @@ build/
 install/
 log/
 
-# Third-party packages pulled in by robot.repos
+# Third-party packages pulled in by ros2_ws/robot.repos
 ros2_ws/src/D05_lidar/
 ros2_ws/src/camera_ros/
 
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# macOS
 .DS_Store
+._*
+.AppleDouble
+.Spotlight-V100
+.Trashes
+
+# Editors and local tool settings
 .vscode/
 .idea/
+*.swp
+.claude/settings.local.json
+
+# Secrets
 .env
