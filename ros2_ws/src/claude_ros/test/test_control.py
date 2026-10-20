@@ -68,3 +68,17 @@ def test_steers_away_from_close_right_wall():
     p = c.Perception(front=None, side_right=0.03, front_known=True)
     state, _ = _run(intent, p, 2.0)
     assert state.angular > 0.0
+
+
+def test_edge_stops_forward_at_once_but_allows_reverse_and_turning():
+    intent = c.Intent(linear=1.0, expires_at=100.0)
+    state, _ = _run(intent, CLEAR, 2.0)
+    assert state.linear > 0.0
+    edge = c.Perception(front=None, rear=None, front_known=True, rear_known=True,
+                        edge_front=True)
+    state = c.step(state, intent, edge, LIM, 2.05, 0.05)
+    assert state.linear == 0.0                         # no ramp-down over the edge
+    assert 'emergency_stop_edge' in state.flags
+    back = c.Intent(linear=-0.3, angular=0.5, expires_at=100.0)
+    state, _ = _run(back, edge, 1.0, state=state, t0=2.05)
+    assert state.linear < 0.0 and state.angular > 0.0

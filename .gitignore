@@ -6,6 +6,7 @@ log/
 # Third-party packages pulled in by ros2_ws/robot.repos
 ros2_ws/src/D05_lidar/
 ros2_ws/src/camera_ros/
+ros2_ws/src/libcamera/
 
 # Python
 __pycache__/

@@ -7,7 +7,8 @@ Pipeline each control tick (default 20 Hz):
   2. limit    = slow down in proportion to the free space ahead/behind, stop inside stop_distance
   3. steer    = add a small bias away from walls that are close beside the robot
   4. ramp     = move the commanded velocity toward the target under acceleration limits
-  5. e-stop   = bypass the ramp and zero forward/backward speed inside hard_stop_distance
+  5. e-stop   = bypass the ramp and zero forward/backward speed inside hard_stop_distance,
+                or the moment the edge sensor sees a drop ahead (no floor under the bumper)
 """
 from __future__ import annotations
 
@@ -46,6 +47,7 @@ class Perception:
     side_right: float | None = None
     front_known: bool = False        # True when at least one fresh forward sensor exists
     rear_known: bool = False
+    edge_front: bool = False         # True = no floor ahead (drop, stairs) or edge sensor stale
 
 
 @dataclass
@@ -105,7 +107,10 @@ def step(state: ControllerState, intent: Intent, p: Perception, limits: ControlL
         if intent.expires_at > 0.0:
             flags.append('intent_expired')
 
-    # 2. Clearance-based speed limits.
+    # 2. Clearance-based speed limits. A drop ahead forbids any forward motion.
+    if v_target > 0.0 and p.edge_front:
+        flags.append('edge_front')
+        v_target = 0.0
     if v_target > 0.0:
         cap = clearance_speed_cap(p.front, limits) if p.front_known else 0.0
         if not p.front_known:
@@ -136,6 +141,9 @@ def step(state: ControllerState, intent: Intent, p: Perception, limits: ControlL
     w = ramp(state.angular, w_target, limits.accel_angular, limits.accel_angular * 2.0, dt)
 
     # 5. Emergency stop overrides the ramp.
+    if v > 0.0 and p.edge_front:
+        v = 0.0
+        flags.append('emergency_stop_edge')
     if v > 0.0 and p.front is not None and p.front <= limits.hard_stop_distance:
         v = 0.0
         flags.append('emergency_stop_front')
