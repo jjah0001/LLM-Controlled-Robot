@@ -2,14 +2,14 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
-from example_interfaces.msg import Float64
+from sensor_msgs.msg import Range
 import sys
 import termios
 import tty
 import threading
 
-LINEAR_SPEED = 0.5   # m/s (scaled to duty %)
-ANGULAR_SPEED = 0.5  # rad/s (scaled to duty %)
+LINEAR_SPEED = 0.2   # m/s
+ANGULAR_SPEED = 1.0  # rad/s
 
 
 class KeyboardController(Node):
@@ -18,7 +18,7 @@ class KeyboardController(Node):
 
         self.publisher = self.create_publisher(Twist, '/cmd_vel', 10)
         self.subscriber = self.create_subscription(
-            Float64, 'ultrasonic_data', self.listener_callback, 10
+            Range, 'ultrasonic/range', self.listener_callback, 10
         )
 
         self.get_logger().info(
@@ -80,8 +80,8 @@ class KeyboardController(Node):
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
-    def listener_callback(self, msg: Float64):
-        self.get_logger().info(f'Ultrasonic Reading: {msg.data:.2f} cm')
+    def listener_callback(self, msg: Range):
+        self.get_logger().info(f'Ultrasonic: {msg.range:.2f} m', throttle_duration_sec=1.0)
 
 
 def main(args=None):

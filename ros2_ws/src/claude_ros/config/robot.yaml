@@ -1,0 +1,83 @@
+# Parameters for the whole robot. Measure your robot and edit the footprint values:
+# wrong lidar_to_front_m / robot_half_width_m make the safety layer stop too early or too late.
+
+motion_controller:
+  ros__parameters:
+    control_rate_hz: 20.0
+    summary_rate_hz: 5.0
+    scan_timeout_s: 0.6
+    ultrasonic_timeout_s: 0.5
+    max_intent_duration_s: 6.0
+    # LiDAR mounting. Check with: ros2 topic echo /perception/summary
+    # (hold a box in front of the robot: lidar_sectors_m.front must drop).
+    lidar_yaw_offset_deg: 0.0     # rotate the scan so 0 deg is straight ahead
+    lidar_reverse: false          # true if left/right come out swapped
+    lidar_self_filter_m: 0.05     # ignore returns from the robot's own body
+    lidar_to_front_m: 0.10        # LiDAR centre -> front bumper
+    lidar_to_rear_m: 0.10         # LiDAR centre -> rear bumper
+    robot_half_width_m: 0.10
+    corridor_margin_m: 0.05
+    ultrasonic_to_front_m: 0.0    # ultrasonic face -> front bumper (0 if flush)
+    # Motion envelope
+    max_linear: 0.25              # m/s
+    max_angular: 1.2              # rad/s
+    accel_linear: 0.35            # m/s^2
+    decel_linear: 0.8             # m/s^2
+    accel_angular: 2.5            # rad/s^2
+    stop_distance: 0.20           # m clearance: stop travelling toward the obstacle
+    slow_distance: 0.70           # m clearance: start slowing down
+    hard_stop_distance: 0.10      # m clearance: immediate stop, bypasses ramping
+    avoid_distance: 0.15          # m side gap where wall-avoidance steering starts
+    avoid_gain: 0.6               # rad/s of steering at zero gap, full speed
+    max_turn_while_blocked: 0.8   # rad/s
+
+claude_agent:
+  ros__parameters:
+    model: claude-opus-5-5        # claude-haiku-5-5 is faster and cheaper if latency matters
+    effort: low                   # low keeps decisions quick; raise for harder missions
+    max_tokens: 4096
+    refusal_fallback: true
+    decision_period_s: 2.0        # one Claude call every ~2 s (longer if the call is slower)
+    request_timeout_s: 15.0
+    min_intent_duration_s: 1.0
+    max_intent_duration_s: 6.0
+    image_topic: /camera/image_raw
+    image_width: 512
+    image_height: 384
+    jpeg_quality: 75
+    history_length: 6
+    mission: "Explore the area safely, heading for open space and avoiding obstacles."
+    persona_file: ""              # robot identity; "" = find the repo's CLAUDE.md automatically
+    memory_file: ~/.ros/robot_memory/notes.jsonl   # delete to make the robot forget
+    memory_recall: 30             # notes replayed to Claude with every decision
+    memory_max_notes: 500         # oldest notes are dropped beyond this
+
+motor_driver:
+  ros__parameters:
+    max_wheel_speed_mps: 0.30     # wheel speed at 100% duty; calibrate on the floor
+    track_width_m: 0.16           # distance between the two wheels
+    min_duty: 60.0                # % duty below which the motors stall (old code used 60; lower it if your motors start lower, for gentler starts)
+    max_duty: 100.0
+    deadband: 0.02                # wheel commands below this fraction -> motor off
+    pwm_hz: 1000.0
+    cmd_timeout_s: 0.5
+    invert_left: false
+    invert_right: false
+
+ultrasonic_publisher:
+  ros__parameters:
+    rate_hz: 15.0
+    timeout_s: 0.025
+
+camera:
+  ros__parameters:
+    width: 640
+    height: 480
+    format: RGB888
+
+lidar:
+  ros__parameters:
+    port: /dev/ttyUSB0
+    baudrate: 230400
+    frame_id: laser_link
+    version: 4

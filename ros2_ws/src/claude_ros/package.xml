@@ -2,17 +2,24 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>claude_ros</name>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <description>Autonomous robot navigation using Claude as the decision-making brain.</description>
   <maintainer email="jeffrey.jahja7@gmail.com">jeffrey</maintainer>
   <license>MIT</license>
 
-  <depend>rclpy</depend>
-  <depend>geometry_msgs</depend>
-  <depend>sensor_msgs</depend>
-  <depend>cv_bridge</depend>
-  <depend>launch</depend>
-  <depend>launch_ros</depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>motor_driver</exec_depend>
+  <exec_depend>ultrasonic_control</exec_depend>
+  <!-- anthropic is installed with pip: see the workspace README -->
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

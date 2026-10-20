@@ -1,84 +1,45 @@
 # claude_ros
 
-Autonomous robot navigation package that uses [Claude](https://www.anthropic.com/claude) as the
-decision-making brain. On each tick the node collects camera, LiDAR, and ultrasonic data, sends
-it to the Claude API, and publishes the resulting velocity command to `/cmd_vel`.
+Claude as the navigation brain of a differential-drive robot, with a local controller that
+keeps the motion smooth and safe between Claude's decisions.
 
-## Prerequisites
+| Node | Rate | Role |
+|---|---|---|
+| `motion_controller_node` | 20 Hz | Fuses `/scan` (D05 dTOF LiDAR) and `ultrasonic/range`, executes the latest Claude intent with acceleration limits, slows/stops near obstacles, steers away from walls, publishes `/cmd_vel` and `/perception/summary`. |
+| `claude_agent_node` | ~0.5 Hz | Sends the camera frame, `/perception/summary` and memory notes to Claude with the repo's `CLAUDE.md` as the system prompt; publishes motion on `/claude/intent`, speech on `/claude/say`, and saves notes. |
 
-| Requirement | Notes |
-|---|---|
-| ROS 2 Jazzy | Tested on Raspberry Pi (Ubuntu 24.04) |
-| `motor_driver` package | Listens on `/cmd_vel` → GPIO |
-| `ultrasonic_control` package | Publishes `ultrasonic/range` |
-| `camera_ros` package | Publishes `/camera/image_raw` |
-| Anthropic API key | `export ANTHROPIC_API_KEY=sk-ant-...` |
-| Python deps | `pip install anthropic opencv-python numpy` |
+See the repository's `docs/DEVELOPMENT.md` for the full architecture, setup and tuning guide.
 
 ## Quick start
 
 ```bash
-# 1. Set your API key
-export ANTHROPIC_API_KEY=sk-ant-...
-
-# 2. Build
-cd ~/Documents/LLM-Controlled-Robot/ros2_ws
+cd ros2_ws
+vcs import src < robot.repos
 source /opt/ros/jazzy/setup.bash
-colcon build --packages-select claude_ros
-source install/setup.bash
-
-# 3. Launch everything
-ros2 launch claude_ros claude_ros.launch.py
+colcon build --symlink-install && source install/setup.bash
+export ANTHROPIC_API_KEY=sk-ant-...
+ros2 launch claude_ros robot.launch.py
 ```
 
-## What gets launched
+Launch arguments: `use_lidar`, `use_camera`, `use_agent` (true/false), `lidar_port`,
+`model`, `mission`, `params_file`.
 
-| Node | Package | Role |
+## Topics
+
+| Topic | Type | Direction |
 |---|---|---|
-| `ultrasonic_publisher` | `ultrasonic_control` | Reads HC-SR04, publishes `ultrasonic/range` |
-| `motor_driver` | `motor_driver` | Drives L298N from `/cmd_vel` |
-| `claude_agent` | `claude_ros` | Collects sensors → Claude API → `/cmd_vel` |
+| `/scan` | `sensor_msgs/LaserScan` | in (m1ct_d2) |
+| `ultrasonic/range` | `sensor_msgs/Range` | in (ultrasonic_control) |
+| `/camera/image_raw` | `sensor_msgs/Image` | in (camera_ros) |
+| `/claude/intent` | `std_msgs/String` (JSON) | agent → controller |
+| `/claude/say` | `std_msgs/String` | agent → (a text-to-speech node) |
+| `/claude/note` | `std_msgs/String` | agent → (each new memory note) |
+| `/perception/summary` | `std_msgs/String` (JSON) | controller → agent |
+| `/cmd_vel` | `geometry_msgs/Twist` | controller → motor_driver |
 
-> **Note:** The camera node (`camera_ros`) must be started separately as it requires
-> libcamera and a device argument. See `camera_ros/README.md`.
+## Changing the behaviour
 
-## Tuning
-
-```bash
-# Slower, more deliberate decisions
-ros2 launch claude_ros claude_ros.launch.py call_rate_hz:=0.25
-
-# Faster decisions, lower speed limits
-ros2 launch claude_ros claude_ros.launch.py call_rate_hz:=1.0 max_linear:=0.3
-
-# Use a smarter (but slower/more expensive) model
-ros2 launch claude_ros claude_ros.launch.py model:=claude-sonnet-4-6
-```
-
-## Topic graph
-
-```
-/scan  ──────────────────────────────────┐
-ultrasonic/range  ──────────────────────►│ /claude_agent
-/camera/image_raw  ─────────────────────►│      │
-                                          │      └──► /cmd_vel ──► /motor_driver ──► GPIO
-                                          │
-                               Anthropic API (HTTPS, ~0.5 Hz)
-```
-
-## Safety notes
-
-- Claude is instructed to stop if any forward sensor reads < 0.3 m.
-- If the API call fails the agent publishes a zero velocity (stop).
-- `motor_driver_node` has its own 0.5 s watchdog: if `/cmd_vel` goes silent the motors stop.
-- Keep `call_rate_hz` ≤ 1.0 to avoid hitting API rate limits.
-
-## Customising Claude's behaviour
-
-Open `claude_ros/claude_agent_node.py` and edit `SYSTEM_PROMPT`. Examples:
-
-- Add a goal: *"Your mission is to patrol the room and return to the start."*
-- Add a constraint: *"Never turn right."*
-- Change the task: *"Follow the person in the camera image."*
-
-The JSON output schema (`linear_x`, `angular_z`, `reason`) must remain unchanged.
+Edit the repository's `CLAUDE.md` to change who the robot is (personality, goals, how it
+speaks and what it remembers). Set the current task with `mission` in `config/robot.yaml` or
+on the command line (`mission:="Follow the person in front of you"`). The decision schema in
+`intent.py` is the contract with the controller; change both sides together.

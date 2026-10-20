@@ -1,0 +1,10 @@
+# Third-party packages. From ros2_ws/:  vcs import src < robot.repos
+repositories:
+  D05_lidar:
+    type: git
+    url: https://github.com/jjah0001/D05_lidar.git
+    version: main
+  camera_ros:
+    type: git
+    url: https://github.com/christianrauch/camera_ros.git
+    version: main
