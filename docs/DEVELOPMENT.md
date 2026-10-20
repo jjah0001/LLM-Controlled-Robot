@@ -123,7 +123,8 @@ Most important on a new robot:
   HC-SR04 TRIG=4, ECHO=27 (ECHO is 5 V: use a divider to 3.3 V); IR edge sensors
   front_left=5, front_right=6 (3.3 V powered, `cliff_publisher`, `use_cliff:=true`).
 - LiDAR on `/dev/ttyUSB0` @ 230400; install `sc_mini.rules` from the driver repo for permissions.
-- The robot uses a Raspberry Pi 4 (`RPi.GPIO` works; on a Pi 5 you would need `python3-rpi-lgpio`).
+- The robot uses a Raspberry Pi 4 on Ubuntu 24.04. `RPi.GPIO` comes from `python3-rpi-lgpio` (a
+  drop-in that uses `/dev/gpiochip*`); the README's Step 4 gives the user access via `dialout`.
 
 ## Gotchas
 
