@@ -259,6 +259,8 @@ class ClaudeAgentNode(Node):
         t_call = time.monotonic()
         response = self._call_claude(content)
         latency = time.monotonic() - t_call
+        if self._stop_evt.is_set():
+            return                      # shut down while Claude was thinking
         if response is None:
             self._publish(intent_mod.stop_intent('Claude unavailable'))
             return
@@ -344,6 +346,8 @@ class ClaudeAgentNode(Node):
             return None
 
     def _publish(self, decision: dict):
+        if self._stop_evt.is_set() or not rclpy.ok():
+            return                      # shutting down: a late reply must not publish
         self._intent_pub.publish(String(data=intent_mod.encode(decision)))
 
     def shutdown(self):
