@@ -1,0 +1,15 @@
+# colcon output (build from ros2_ws/, never commit these)
+build/
+install/
+log/
+
+# Third-party packages pulled in by robot.repos
+ros2_ws/src/D05_lidar/
+ros2_ws/src/camera_ros/
+
+__pycache__/
+*.pyc
+.DS_Store
+.vscode/
+.idea/
+.env

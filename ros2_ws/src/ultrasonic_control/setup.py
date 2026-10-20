@@ -14,8 +14,8 @@ setup(
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='jeffrey',
-    maintainer_email='you@example.com',
-    description='ROS2 control: drive forward until ultrasonic detects obstacle.',
+    maintainer_email='jeffrey.jahja7@gmail.com',
+    description='Front HC-SR04 ultrasonic range publisher (plus a legacy drive-until-obstacle demo).',
     license='MIT',
     tests_require=['pytest'],
     entry_points={

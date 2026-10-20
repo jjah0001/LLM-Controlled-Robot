@@ -1,95 +1,100 @@
 #!/usr/bin/env python3
+"""L298N differential-drive motor driver: /cmd_vel (m/s, rad/s) -> PWM on the Pi's GPIO.
+
+Converts the body twist into left/right wheel speeds with the robot's track width,
+scales both wheels together when one would saturate (so the curve is preserved),
+and maps the result onto [min_duty, max_duty] so speed scales smoothly above the
+duty where the motors stall. Velocity ramping is done upstream in motion_controller.
+"""
 import rclpy
-from rclpy.node import Node
 from geometry_msgs.msg import Twist
+from rclpy.node import Node
 import RPi.GPIO as GPIO
+
+from motor_driver.kinematics import fraction_to_duty, twist_to_wheels
+
+# BCM pins. Motor A = left, motor B = right.
+IN1, IN2, ENA = 17, 22, 18
+IN3, IN4, ENB = 23, 24, 19
+PINS = (IN1, IN2, IN3, IN4, ENA, ENB)
 
 
 class MotorDriver(Node):
     def __init__(self):
         super().__init__('motor_driver')
-        self.subscription = self.create_subscription(
-            Twist, '/cmd_vel', self.cmd_vel_callback, 10
-        )
+        p = self.declare_parameter
+        p('max_wheel_speed_mps', 0.30)
+        p('track_width_m', 0.16)
+        p('min_duty', 60.0)
+        p('max_duty', 100.0)
+        p('deadband', 0.02)
+        p('pwm_hz', 1000.0)
+        p('cmd_timeout_s', 0.5)
+        p('invert_left', False)
+        p('invert_right', False)
+        g = lambda n: self.get_parameter(n).value  # noqa: E731
+        self.max_wheel = float(g('max_wheel_speed_mps'))
+        self.track = float(g('track_width_m'))
+        self.min_duty = float(g('min_duty'))
+        self.max_duty = float(g('max_duty'))
+        self.deadband = float(g('deadband'))
+        self.timeout = float(g('cmd_timeout_s'))
+        self.inv_l = -1.0 if g('invert_left') else 1.0
+        self.inv_r = -1.0 if g('invert_right') else 1.0
 
-        # Motor A (Left):  IN1=17, IN2=22, ENA=18 (PWM)
-        # Motor B (Right): IN3=23, IN4=24, ENB=19 (PWM)
-        self.IN1, self.IN2, self.ENA = 17, 22, 18
-        self.IN3, self.IN4, self.ENB = 23, 24, 19
-
+        GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
-        for pin in [self.IN1, self.IN2, self.IN3, self.IN4, self.ENA, self.ENB]:
-            GPIO.setup(pin, GPIO.OUT)
+        for pin in PINS:
+            GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+        self.pwm_a = GPIO.PWM(ENA, float(g('pwm_hz')))
+        self.pwm_b = GPIO.PWM(ENB, float(g('pwm_hz')))
+        self.pwm_a.start(0)
+        self.pwm_b.start(0)
 
-        self.pwmA = GPIO.PWM(self.ENA, 2000)
-        self.pwmB = GPIO.PWM(self.ENB, 2000)
-        self.pwmA.start(0)
-        self.pwmB.start(0)
+        self._last_cmd = self.get_clock().now()
+        self._stopped = True
+        self.create_subscription(Twist, '/cmd_vel', self._cmd_cb, 10)
+        self.create_timer(0.1, self._watchdog)
+        self.get_logger().info(
+            f'Motor driver ready: {self.max_wheel:.2f} m/s at 100% duty, '
+            f'track {self.track:.3f} m, duty {self.min_duty:.0f}-{self.max_duty:.0f}%.')
 
-        self.MIN_DUTY = 60.0  # minimum duty cycle (%) when motor is active
+    def _cmd_cb(self, msg: Twist):
+        self._last_cmd = self.get_clock().now()
+        left, right = twist_to_wheels(msg.linear.x, msg.angular.z, self.track, self.max_wheel)
+        self._drive(left * self.inv_l, right * self.inv_r)
 
-        self._last_cmd_time = self.get_clock().now()
-        self._timeout_timer = self.create_timer(0.1, self._check_timeout)
+    def _drive(self, left, right):
+        # Forward = IN2 high on the left motor and IN3 high on the right (as wired).
+        self._set(self.pwm_a, IN2, IN1, left)
+        self._set(self.pwm_b, IN3, IN4, right)
+        self._stopped = left == 0.0 and right == 0.0
 
-        self.get_logger().info('Motor driver node started, listening on /cmd_vel.')
-
-    def cmd_vel_callback(self, msg: Twist):
-        self._last_cmd_time = self.get_clock().now()
-
-        linear = msg.linear.x
-        angular = msg.angular.z
-
-        left = max(-1.0, min(1.0, linear - angular))
-        right = max(-1.0, min(1.0, linear + angular))
-
-        self._set_motor_a(left)
-        self._set_motor_b(right)
-
-    def _set_motor_a(self, speed: float):
-        duty = abs(speed) * 100.0
-        if duty > 0:
-            duty = max(self.MIN_DUTY, duty)
-        if speed > 0:
-            GPIO.output(self.IN1, GPIO.LOW)
-            GPIO.output(self.IN2, GPIO.HIGH)
-        elif speed < 0:
-            GPIO.output(self.IN1, GPIO.HIGH)
-            GPIO.output(self.IN2, GPIO.LOW)
+    def _set(self, pwm, pin_fwd, pin_rev, fraction):
+        duty = fraction_to_duty(fraction, self.min_duty, self.max_duty, self.deadband)
+        if duty == 0.0:
+            GPIO.output(pin_fwd, GPIO.LOW)
+            GPIO.output(pin_rev, GPIO.LOW)
+        elif fraction > 0:
+            GPIO.output(pin_fwd, GPIO.HIGH)
+            GPIO.output(pin_rev, GPIO.LOW)
         else:
-            GPIO.output(self.IN1, GPIO.LOW)
-            GPIO.output(self.IN2, GPIO.LOW)
-        self.pwmA.ChangeDutyCycle(duty)
+            GPIO.output(pin_fwd, GPIO.LOW)
+            GPIO.output(pin_rev, GPIO.HIGH)
+        pwm.ChangeDutyCycle(duty)
 
-    def _set_motor_b(self, speed: float):
-        duty = abs(speed) * 100.0
-        if duty > 0:
-            duty = max(self.MIN_DUTY, duty)
-        if speed > 0:
-            GPIO.output(self.IN3, GPIO.HIGH)
-            GPIO.output(self.IN4, GPIO.LOW)
-        elif speed < 0:
-            GPIO.output(self.IN3, GPIO.LOW)
-            GPIO.output(self.IN4, GPIO.HIGH)
-        else:
-            GPIO.output(self.IN3, GPIO.LOW)
-            GPIO.output(self.IN4, GPIO.LOW)
-        self.pwmB.ChangeDutyCycle(duty)
-
-    def stop(self):
-        self._set_motor_a(0.0)
-        self._set_motor_b(0.0)
-
-    def _check_timeout(self):
-        elapsed = (self.get_clock().now() - self._last_cmd_time).nanoseconds / 1e9
-        if elapsed > 0.5:
-            self.stop()
+    def _watchdog(self):
+        elapsed = (self.get_clock().now() - self._last_cmd).nanoseconds / 1e9
+        if elapsed > self.timeout and not self._stopped:
+            self.get_logger().warn('No /cmd_vel for %.1fs: stopping motors.' % elapsed)
+            self._drive(0.0, 0.0)
 
     def destroy_node(self):
         try:
-            self.stop()
-            self.pwmA.stop()
-            self.pwmB.stop()
-            GPIO.cleanup()
+            self._drive(0.0, 0.0)
+            self.pwm_a.stop()
+            self.pwm_b.stop()
+            GPIO.cleanup(list(PINS))
         except Exception as e:
             self.get_logger().error(f'Cleanup error: {e}')
         super().destroy_node()
@@ -102,8 +107,10 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
-    node.destroy_node()
-    rclpy.shutdown()
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
