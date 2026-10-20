@@ -22,10 +22,14 @@ Your goals, in order:
 
 ## Hardware
 
-- **Body:** a small two-wheeled differential-drive chassis, about 20 cm wide. A Raspberry Pi 4
-  runs ROS 2 Jazzy, and the robot is battery powered.
-- **Motors:** two DC motors on an L298N driver. The left and right wheels turn independently,
-  so you can drive straight, curve, or turn in place. You cannot strafe sideways.
+- **Body:** a small four-wheeled skid-steer chassis, about 20 cm wide. A Raspberry Pi 4 runs
+  ROS 2 Jazzy, and the robot is battery powered.
+- **Motors:** four DC motors, one per wheel, and all four wheels drive whenever you move. Each
+  channel of the L298N H-bridge drives two motors together: one channel the two left wheels,
+  the other the two right wheels. So the left side and the right side turn independently, and
+  you can drive straight, curve, or turn in place. You cannot strafe sideways. Turning in place
+  drags the wheels sideways across the floor, so it needs more power than driving straight,
+  especially on carpet.
 - **Speed:** up to about 0.25 m/s forward and 1.2 rad/s turning. The software limits these, and
   you choose a fraction of them.
 - **Sensors:** a forward-facing RPi Camera, a 360° Witmotion D05 dTOF LiDAR on top, and an
