@@ -11,7 +11,7 @@ limits and an obstacle safety layer, so motion stays smooth and safe between API
 - [`ros2_ws/src/claude_ros`](ros2_ws/src/claude_ros) lists the nodes and topics.
 
 Contents: [Quick start](#quick-start) · [LiDAR setup](#lidar-setup-witmotion-d05) ·
-[Camera setup](#rpi-camera-setup) · [Edge sensor](#edge-sensor-stops-falls) ·
+[Camera setup](#rpi-camera-setup) · [Edge sensors](#edge-sensors-stops-falls) ·
 [Motor power](#motor-power-pwm-and-carpet)
 
 ## Quick start
@@ -37,7 +37,7 @@ ros2 launch claude_ros robot.launch.py
 For the camera, also follow [RPi Camera setup](#rpi-camera-setup) (it needs Raspberry Pi's
 libcamera, built once). Useful launch options: `use_agent:=false` (sensors and motors only, no Claude),
 `use_camera:=false`, `use_lidar:=false`, `lidar_port:=/dev/ttyUSB1`, `surface:=carpet`, `min_duty:=85`, `kick_s:=0.25`,
-`use_edge_sensor:=true`,
+`use_cliff:=true`,
 `mission:="..."`, `model:=claude-haiku-5-5`. If the LiDAR driver or `camera_ros` isn't built,
 the launch file skips it with a warning and starts the rest.
 
@@ -172,43 +172,63 @@ If the camera still won't cooperate, the robot runs without it: launch with
 `use_camera:=false`. If no frame newer than `image_timeout_s` is available, Claude is told the
 camera is unavailable and decides from the LiDAR and ultrasonic distances alone.
 
-## Edge sensor (stops falls)
+## Edge sensors (stops falls)
 
-The LiDAR scans one horizontal plane and the front ultrasonic looks straight ahead, so
-**neither can see stairs going down or the edge of a table**. Without extra hardware, only
-Claude's camera can spot a drop, which is not reliable enough on its own (it decides every
-couple of seconds, and the camera can miss an edge in poor light). Fit a downward-facing
-**edge sensor** before running Scout anywhere near stairs or on a raised surface.
+The LiDAR and ultrasonic look straight ahead, so **they cannot see a drop**. A floor that ends
+looks like open space to them. Software alone can't fix that. Without extra sensors, the only
+protection is Claude watching the camera (it is told to keep at least 0.5 m from any edge it
+sees), and that isn't reliable enough to count on. **Fit downward-facing IR edge sensors**
+before letting the robot drive near stairs or on a table.
 
-**Hardware:** a second HC-SR04 (the same part as the front sensor).
+**Parts:** two digital IR reflectance modules (TCRT5000 boards, a few dollars each, with a
+digital `DO`/`OUT` pin and a sensitivity potentiometer).
 
-1. **Mount it** at the front, ahead of the wheels, pointing straight down at the floor, about
-   4-6 cm above the floor (an HC-SR04 can't measure closer than about 2 cm). If it sits right
-   at the bumper, tilt it slightly forward so it sees the drop a little earlier.
-2. **Wire it:** VCC to 5 V, GND to GND, TRIG to **BCM 5** (pin 29), ECHO to **BCM 6** (pin 31)
-   through the same 5 V to 3.3 V divider as the front sensor (for example 1 kΩ and 2 kΩ).
-   Never connect ECHO to the Pi directly. Other pins can be set under `edge_sensor:` in
-   `config/robot.yaml`.
-3. **Set the threshold.** Measure the sensor's height above the floor and set
-   `edge_max_floor_m` (under `motion_controller:` in `robot.yaml`) to that height plus about
-   0.04 m. The default `0.10` suits a sensor 6 cm up.
-4. **Test it** with the wheels off the ground or the motors unplugged:
+**Mounting:** one under each front corner, pointing straight down, about 5-10 mm above the
+floor and **at least 5 cm in front of the wheels**. The robot needs that much room to stop.
+Put them at the corners, not in the middle: if the robot meets an edge at a shallow angle, a
+corner reaches it first.
+Add a third one at the back (named e.g. `rear`) if the robot often reverses.
+
+**Wiring** (power the modules from 3.3 V so their output is safe for the Pi's GPIO; any 3.3 V
+and GND header pins will do):
+
+| Module pin | front_left | front_right |
+|---|---|---|
+| VCC | 3.3 V (pin 1) | 3.3 V (pin 17) |
+| GND | GND (pin 9) | GND (pin 25) |
+| DO / OUT | GPIO5 (pin 29) | GPIO6 (pin 31) |
+
+**Set up and test:**
+1. With the robot on the floor, turn each module's potentiometer until its LED is on. Then lift
+   the robot about 3 cm: the LED must go off. Check this on your darkest floor or carpet too,
+   since dark surfaces reflect less IR.
+2. Start the robot with the edge sensors on:
    ```bash
-   ros2 launch claude_ros robot.launch.py use_edge_sensor:=true use_agent:=false
-   ros2 topic echo /edge/range                       # second terminal: about the mount height
-   ros2 topic echo /perception/summary --field data  # look for "edge_sensor": "floor_ok"
+   ros2 launch claude_ros robot.launch.py use_cliff:=true
+   ros2 topic echo /cliff          # second terminal: lift the front, "front" must become true
    ```
-   Hold the front of the robot over the edge of a table: `edge_sensor` must change to
-   `drop_ahead`. Then always launch with `use_edge_sensor:=true`.
+3. Bench test: push the robot slowly toward a table edge by hand (agent off:
+   `use_agent:=false`) and check it stops while its front wheels are still well on the table.
 
-What happens when it sees a drop: the safety layer stops forward motion **immediately**,
-skipping the usual smooth slow-down, and refuses to go forward until it sees floor again.
-Reversing and turning still work, so Scout backs away and turns. Scout is told about the drop
-and writes a note so it avoids that spot later. If the sensor stops publishing, the robot
-treats that as a drop too, so a loose wire stops the robot instead of letting it drive blind.
-Carpet absorbs some sound, so repeat step 4 on your carpet. If the reading jumps around there,
-raise `edge_max_floor_m` a little, but keep it below the height of the smallest step you need
-to catch.
+Both modules can share the 3.3 V supply. Never power them from 5 V: their output would then
+be 5 V, which can damage the Pi's GPIO.
+
+**What the robot does:**
+- **Edge ahead:** forward travel stops immediately, without the usual gentle slow-down. The
+  robot may still turn in place or back away, and Claude is told to back off and turn away.
+- **Sensors silent:** with `use_cliff:=true`, the robot will not drive forward or backward
+  until `/cliff` is publishing again.
+- **Loose wire:** reads as an edge, so the robot stops.
+- **Very dark floor or rug:** may also read as an edge, because it reflects little IR, so the
+  robot refuses to drive onto it. Turn the potentiometer up a little (step 1), but re-check
+  that lifting the robot still turns the LED off.
+
+Claude is also told to keep half a metre from any edge it sees in the camera and to note it in
+memory, but the sensors are what actually stop a fall.
+
+Pins, the "no floor" level and the debounce are under `cliff_publisher:` in `robot.yaml`. To
+always use the sensors, change the `use_cliff` default to `'true'` in
+`ros2_ws/src/claude_ros/launch/robot.launch.py`.
 
 ## Motor power (PWM and carpet)
 

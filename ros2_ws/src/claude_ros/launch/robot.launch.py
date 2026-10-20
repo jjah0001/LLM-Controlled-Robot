@@ -5,7 +5,7 @@
     ros2 launch claude_ros robot.launch.py mission:="Find the red ball" model:=claude-haiku-5-5
     ros2 launch claude_ros robot.launch.py surface:=carpet     # more motor power
     ros2 launch claude_ros robot.launch.py min_duty:=85 kick_s:=0.25
-    ros2 launch claude_ros robot.launch.py use_edge_sensor:=true   # downward drop sensor fitted
+    ros2 launch claude_ros robot.launch.py use_cliff:=true          # IR edge sensors fitted
 
 Optional hardware packages (m1ct_d2 LiDAR driver, camera_ros) are skipped with a
 warning when they are not installed, so the rest of the stack still starts.
@@ -56,16 +56,13 @@ def _setup(context):
         else:
             actions.append(LogInfo(msg='[robot.launch] camera_ros not found: camera skipped.'))
 
-    edge = _truthy(arg('use_edge_sensor'))
-    if edge:
-        # Second HC-SR04 pointing at the floor; its own pins come from robot.yaml.
-        actions.append(Node(
-            package='ultrasonic_control', executable='ultrasonic_publisher',
-            name='edge_sensor', output='screen', parameters=[params],
-            remappings=[('ultrasonic/range', 'edge/range')]))
+    use_cliff = _truthy(arg('use_cliff'))
+    if use_cliff:
+        actions.append(Node(package='ultrasonic_control', executable='cliff_publisher',
+                            name='cliff_publisher', output='screen', parameters=[params]))
     else:
-        actions.append(LogInfo(msg='[robot.launch] No edge sensor (use_edge_sensor:=false): '
-                                   'only the camera can spot drops and stairs.'))
+        actions.append(LogInfo(msg='[robot.launch] use_cliff:=false: edges (stairs, table '
+                                   'edges) are NOT detected. See the README, "Edge sensors".'))
     motor_overrides = {k: float(arg(k)) for k in MOTOR_ARGS if arg(k)}
     if arg('surface'):
         motor_overrides['surface'] = arg('surface')
@@ -77,7 +74,7 @@ def _setup(context):
              parameters=[params, motor_overrides]),
         Node(package='claude_ros', executable='motion_controller_node',
              name='motion_controller', output='screen',
-             parameters=[params, {'edge_sensor': edge}]),
+             parameters=[params, {'use_cliff_sensors': use_cliff}]),
     ]
 
     if _truthy(arg('use_agent')):
@@ -97,8 +94,8 @@ def generate_launch_description():
         DeclareLaunchArgument('use_camera', default_value='true'),
         DeclareLaunchArgument('use_agent', default_value='true'),
         DeclareLaunchArgument('lidar_port', default_value='/dev/ttyUSB0'),
-        DeclareLaunchArgument('use_edge_sensor', default_value='false',
-                              description='true if the downward edge (drop) sensor is fitted'),
+        DeclareLaunchArgument('use_cliff', default_value='false',
+                              description='Start the IR edge sensors and require them to drive'),
         DeclareLaunchArgument('surface', default_value='',
                               description='Motor power preset: hard_floor or carpet'),
         DeclareLaunchArgument('min_duty', default_value='',

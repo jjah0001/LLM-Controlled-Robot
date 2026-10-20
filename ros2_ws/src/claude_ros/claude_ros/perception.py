@@ -137,16 +137,3 @@ def fuse_front(lidar_front, ultrasonic_m, ultrasonic_to_front_m: float = 0.0):
     if ultrasonic_m is not None and math.isfinite(ultrasonic_m):
         candidates.append(max(0.0, ultrasonic_m - ultrasonic_to_front_m))
     return min(candidates) if candidates else None
-
-
-def edge_ahead(floor_m, max_floor_m: float) -> bool:
-    """True when a downward-facing sensor at the front bumper shows no floor below it.
-
-    ``floor_m`` is its latest reading: metres to the floor, ``math.inf`` when no echo
-    came back (nothing within range, i.e. a drop), or None when the sensor is stale.
-    A stale sensor counts as an edge, so a dead sensor stops the robot instead of
-    letting it drive blind towards stairs.
-    """
-    if floor_m is None or not math.isfinite(floor_m):
-        return True
-    return floor_m > max_floor_m

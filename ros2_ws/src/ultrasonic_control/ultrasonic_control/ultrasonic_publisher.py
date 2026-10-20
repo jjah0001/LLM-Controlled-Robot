@@ -1,8 +1,8 @@
 # ultrasonic_control/ultrasonic_publisher.py
 """HC-SR04 ultrasonic sensor -> sensor_msgs/Range on ultrasonic/range.
 
-The same node drives the optional downward-facing edge sensor: launch a second
-instance with other pins (trig_pin / echo_pin) and remap the topic to edge/range.
+Pins (trig_pin / echo_pin) and frame_id are parameters, so a second sensor can run as
+another instance with a remapped topic.
 
 Follows REP 117: when no echo comes back within range the node publishes +inf
 ("nothing in range") instead of skipping the reading, so consumers can tell a

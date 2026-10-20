@@ -4,8 +4,8 @@
 Subscribes:
   /scan              sensor_msgs/LaserScan  (Witmotion/M1CT D05 dTOF LiDAR, m1ct_d2 driver)
   ultrasonic/range   sensor_msgs/Range      (front HC-SR04)
-  edge/range         sensor_msgs/Range      (optional downward HC-SR04 that spots drops)
   /claude/intent     std_msgs/String        (JSON from claude_agent_node)
+  /cliff             std_msgs/String        (JSON from cliff_publisher, when use_cliff_sensors)
 Publishes:
   /cmd_vel               geometry_msgs/Twist  (every tick, keeps the motor watchdog fed)
   /perception/summary    std_msgs/String      (JSON world summary consumed by the agent)
@@ -34,6 +34,8 @@ class MotionController(Node):
         p('scan_timeout_s', 0.6)
         p('ultrasonic_timeout_s', 0.5)
         p('max_intent_duration_s', 6.0)
+        p('use_cliff_sensors', False)   # True: no travel unless /cliff is fresh and clear
+        p('cliff_timeout_s', 0.3)
         # LiDAR mounting / robot footprint
         p('lidar_yaw_offset_deg', 0.0)
         p('lidar_reverse', False)
@@ -43,10 +45,6 @@ class MotionController(Node):
         p('robot_half_width_m', 0.10)
         p('corridor_margin_m', 0.05)
         p('ultrasonic_to_front_m', 0.0)
-        # Edge (drop) sensor: a downward-facing range sensor at the front bumper
-        p('edge_sensor', False)
-        p('edge_max_floor_m', 0.10)        # floor further away than this = a drop
-        p('edge_timeout_s', 0.5)
         # Motion limits
         defaults = control.ControlLimits()
         for name in defaults.__dataclass_fields__:
@@ -68,16 +66,15 @@ class MotionController(Node):
         self.us_timeout = float(g('ultrasonic_timeout_s').value)
         self.max_intent = float(g('max_intent_duration_s').value)
         self.us_to_front = float(g('ultrasonic_to_front_m').value)
-        self.edge_enabled = bool(g('edge_sensor').value)
-        self.edge_max_floor = float(g('edge_max_floor_m').value)
-        self.edge_timeout = float(g('edge_timeout_s').value)
+        self.use_cliff = bool(g('use_cliff_sensors').value)
+        self.cliff_timeout = float(g('cliff_timeout_s').value)
 
         self._scan = None
         self._scan_t = -math.inf
         self._us = None
         self._us_t = -math.inf
-        self._edge = None
-        self._edge_t = -math.inf
+        self._cliff = {}
+        self._cliff_t = -math.inf
         self._intent = control.Intent()
         self._state = control.ControllerState()
         self._world = {}
@@ -86,8 +83,8 @@ class MotionController(Node):
         self.create_subscription(LaserScan, '/scan', self._scan_cb, qos_profile_sensor_data)
         self.create_subscription(Range, 'ultrasonic/range', self._range_cb, 10)
         self.create_subscription(String, '/claude/intent', self._intent_cb, 10)
-        if self.edge_enabled:
-            self.create_subscription(Range, 'edge/range', self._edge_cb, 10)
+        if self.use_cliff:
+            self.create_subscription(String, '/cliff', self._cliff_cb, 10)
         self._cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self._summary_pub = self.create_publisher(String, '/perception/summary', 10)
 
@@ -96,8 +93,7 @@ class MotionController(Node):
         self.get_logger().info(
             f'Motion controller ready: max {self.limits.max_linear:.2f} m/s, '
             f'stop at {self.limits.stop_distance:.2f} m clearance, '
-            + (f'edge sensor on (drop beyond {self.edge_max_floor:.2f} m).'
-               if self.edge_enabled else 'NO edge sensor: only the camera can spot drops.'))
+            f'cliff sensors {"on" if self.use_cliff else "OFF (edges are not detected)"}.')
 
     # ── Inputs ────────────────────────────────────────────────────────────────
 
@@ -115,15 +111,20 @@ class MotionController(Node):
             return
         self._us_t = time.monotonic()
 
-    def _edge_cb(self, msg: Range):
-        r = msg.range
-        if math.isinf(r) and r > 0:
-            self._edge = math.inf          # no echo: no floor within range
-        elif math.isfinite(r) and r >= 0.0:
-            self._edge = r
-        else:
+    def _cliff_cb(self, msg: String):
+        try:
+            d = json.loads(msg.data)
+            cliff = {'front': bool(d['front']), 'rear': bool(d['rear']),
+                     'sensors': dict(d.get('sensors', {}))}
+        except (ValueError, KeyError, TypeError) as e:
+            self.get_logger().warn(f'Ignoring malformed /cliff message ({e})',
+                                   throttle_duration_sec=5.0)
             return
-        self._edge_t = time.monotonic()
+        self._cliff, self._cliff_t = cliff, time.monotonic()
+        # Don't wait for the next control tick when driving toward a fresh edge.
+        v = self._state.linear
+        if (cliff['front'] and v > 0.0) or (cliff['rear'] and v < 0.0):
+            self._tick()
 
     def _intent_cb(self, msg: String):
         try:
@@ -162,20 +163,23 @@ class MotionController(Node):
         front = perception.fuse_front(lidar_front, us, self.us_to_front)
         world['front_clearance_m'] = None if front is None else round(front, 2)
         world['rear_clearance_m'] = None if lidar_rear is None else round(lidar_rear, 2)
-
-        edge = False
-        if self.edge_enabled:
-            fresh = self._edge is not None and now - self._edge_t <= self.edge_timeout
-            floor = self._edge if fresh else None
-            edge = perception.edge_ahead(floor, self.edge_max_floor)
-            world['edge_sensor'] = ('sensor_stale' if floor is None
-                                    else 'drop_ahead' if edge else 'floor_ok')
+        cliff_front = cliff_rear = False
+        cliff_known = True
+        if self.use_cliff:
+            cliff_known = now - self._cliff_t <= self.cliff_timeout
+            if cliff_known:
+                cliff_front, cliff_rear = self._cliff['front'], self._cliff['rear']
+                world['cliff'] = {'edge_ahead': cliff_front, 'edge_behind': cliff_rear,
+                                  'sensors': self._cliff['sensors']}
+            else:
+                world['cliff'] = 'sensors silent: travel stopped'
         else:
-            world['edge_sensor'] = 'not_fitted'
+            world['cliff'] = 'no cliff sensors installed: watch the camera for edges'
         self._world = world
         return control.Perception(
             front=front, rear=lidar_rear, side_left=side_l, side_right=side_r,
-            front_known=scan_ok or us_ok, rear_known=scan_ok, edge_front=edge)
+            front_known=scan_ok or us_ok, rear_known=scan_ok,
+            cliff_front=cliff_front, cliff_rear=cliff_rear, cliff_known=cliff_known)
 
     # ── Control loop ──────────────────────────────────────────────────────────
 
@@ -188,7 +192,7 @@ class MotionController(Node):
         prev_flags = set(self._state.flags)
         self._state = control.step(self._state, self._intent, p, self.limits, now, dt)
         for f in set(self._state.flags) - prev_flags:
-            if f.startswith(('emergency', 'blocked', 'no_', 'edge')):
+            if f.startswith(('emergency', 'blocked', 'no_', 'cliff')):
                 front = self._world.get('front_clearance_m')
                 self.get_logger().warn(f'Safety: {f} (front clearance={front})')
 

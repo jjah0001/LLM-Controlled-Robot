@@ -21,7 +21,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ros2 launch claude_ros robot.launch.py
 ```
 
-Launch arguments: `use_lidar`, `use_camera`, `use_agent`, `use_edge_sensor` (true/false),
+Launch arguments: `use_lidar`, `use_camera`, `use_agent`, `use_cliff` (true/false),
 `lidar_port`, `surface` (`hard_floor`/`carpet`), `min_duty`, `max_duty`, `kick_duty`, `kick_s`,
 `model`, `mission`, `params_file`.
 
@@ -31,7 +31,7 @@ Launch arguments: `use_lidar`, `use_camera`, `use_agent`, `use_edge_sensor` (tru
 |---|---|---|
 | `/scan` | `sensor_msgs/LaserScan` | in (m1ct_d2) |
 | `ultrasonic/range` | `sensor_msgs/Range` | in (ultrasonic_control) |
-| `edge/range` | `sensor_msgs/Range` | in (optional downward HC-SR04, `use_edge_sensor:=true`) |
+| `/cliff` | `std_msgs/String` (JSON) | in (cliff_publisher, IR edge sensors, `use_cliff:=true`) |
 | `/camera/image_raw` | `sensor_msgs/Image` | in (camera_ros) |
 | `/claude/intent` | `std_msgs/String` (JSON) | agent → controller |
 | `/claude/say` | `std_msgs/String` | agent → (a text-to-speech node) |
