@@ -31,3 +31,6 @@ venv/
 
 # Secrets
 .env
+
+# lgpio notification files (when LG_WD is not set)
+.lgd-nfy*

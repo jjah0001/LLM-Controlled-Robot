@@ -124,7 +124,9 @@ Most important on a new robot:
   front_left=5, front_right=6 (3.3 V powered, `cliff_publisher`, `use_cliff:=true`).
 - LiDAR on `/dev/ttyUSB0` @ 230400; install `sc_mini.rules` from the driver repo for permissions.
 - The robot uses a Raspberry Pi 4 on Ubuntu 24.04. `RPi.GPIO` comes from `python3-rpi-lgpio` (a
-  drop-in that uses `/dev/gpiochip*`); the README's Step 4 gives the user access via `dialout`.
+  drop-in that uses `/dev/gpiochip*`); the README's "GPIO setup" gives the user access via
+  `dialout`. `tools/gpio_check.py` checks the library, permissions and every robot pin without ROS.
+  Under lgpio only one process can hold a pin.
 
 ## Gotchas
 
