@@ -28,6 +28,7 @@ import anthropic
 import cv2
 import rclpy
 from cv_bridge import CvBridge
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
@@ -355,7 +356,7 @@ def main(args=None):
     node = ClaudeAgentNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.shutdown()

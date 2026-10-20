@@ -79,7 +79,7 @@ sudo apt install ros-jazzy-cv-bridge python3-opencv python3-numpy
 pip install --break-system-packages -U anthropic "brotli>=1.2"   # or use a venv visible to ROS
 # brotli: Ubuntu's 1.1 can't decode the API's compressed replies; the SDK reports "Connection error"
 source /opt/ros/jazzy/setup.bash
-colcon build --symlink-install
+colcon build --symlink-install --continue-on-error   # camera_ros fails until libcamera is built (README)
 source install/setup.bash
 
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -148,7 +148,7 @@ Most important on a new robot:
   time.
 - Motor power: `motor_driver_node` validates live parameter changes (`surface`,
   `*_min_duty`, `min_duty`, `max_duty`) and publishes the active setting latched on
-  `/motor_driver/power`. Scout can request a surface via the decision's `floor` field, which
+  `/motor_driver/power`. Ratangga can request a surface via the decision's `floor` field, which
   the agent publishes on `/motor_driver/surface`.
 - Claude API: Python `anthropic` SDK, structured outputs, `fallbacks: "default"` with the
   `server-side-fallback-2026-07-01` beta on models that support it. Handle `stop_reason ==

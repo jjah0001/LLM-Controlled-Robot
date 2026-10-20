@@ -12,6 +12,7 @@ import math
 import time
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import Range
 import RPi.GPIO as GPIO
@@ -101,7 +102,8 @@ class UltrasonicPublisher(Node):
             msg.range = math.inf
         else:
             msg.range = max(distance, self.min_range)
-        self.pub.publish(msg)
+        if rclpy.ok():                   # Ctrl+C may have shut ROS down during the ping
+            self.pub.publish(msg)
 
 
 def main():
@@ -109,7 +111,7 @@ def main():
     node = UltrasonicPublisher()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()

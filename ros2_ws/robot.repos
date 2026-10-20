@@ -1,4 +1,5 @@
 # Third-party packages. From ros2_ws/:  vcs import src < robot.repos
+# camera_ros is pinned to a release that builds against the libcamera in camera.repos.
 repositories:
   D05_lidar:
     type: git
@@ -7,4 +8,4 @@ repositories:
   camera_ros:
     type: git
     url: https://github.com/christianrauch/camera_ros.git
-    version: main
+    version: 0.6.0
