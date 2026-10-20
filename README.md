@@ -69,23 +69,26 @@ package), pulled in by `robot.repos`.
 ## RPi Camera
 
 **Why it usually fails on Ubuntu:** the `ros-jazzy-camera-ros` apt package comes with the
-*upstream* libcamera, which does not support most Raspberry Pi cameras (e.g. Camera Module 3)
-or the Pi 5. Pi cameras need **Raspberry Pi's libcamera fork**, built from source next to
+*upstream* libcamera, which may not support your camera module (the Camera Module 3, for
+example, only works with Raspberry Pi's fork). Full Pi camera support on this robot's
+**Raspberry Pi 4** comes from **Raspberry Pi's libcamera fork**, built from source next to
 `camera_ros`. Ubuntu also blocks the memory buffers libcamera needs, unless you allow them
 (step 3).
 
-1. **Connect the cable** with the Pi powered off. The ribbon's metal contacts face the
-   contacts in the connector. A **Pi 5 needs a different cable** from a Pi 4 (the narrow
-   22-pin "mini" connector on the Pi side). It must use the camera port, not the display port.
+1. **Connect the cable** with the Pi powered off. On the Pi 4, the camera port is the
+   connector labelled CAMERA, between the micro-HDMI ports and the audio jack (not the DISPLAY
+   connector by the SD card). Lift the latch, insert the ribbon with its metal contacts facing
+   the HDMI ports (blue tab towards the USB/Ethernet ports), and press the latch down.
 2. **Enable the camera** in `/boot/firmware/config.txt`, then reboot:
    ```ini
    camera_auto_detect=1
+   dtoverlay=vc4-kms-v3d
    ```
-   If it is still not found, turn auto detection off and name the sensor:
+   Remove or comment out any `start_x=1` line (the old legacy camera stack, which libcamera
+   cannot use). If it is still not found, turn auto detection off and name the sensor:
    ```ini
    camera_auto_detect=0
    dtoverlay=imx708        # Camera Module 3   (imx219 = Module 2, ov5647 = Module 1, imx477 = HQ)
-   # On a Pi 5 with the camera in the CAM0 port, add ",cam0": dtoverlay=imx708,cam0
    ```
    Check that the kernel sees it: `sudo dmesg | grep -iE 'imx|ov5647'` should list the sensor,
    and `ls /dev/media*` should show some devices.
@@ -101,7 +104,7 @@ or the Pi 5. Pi cameras need **Raspberry Pi's libcamera fork**, built from sourc
    sudo apt remove ros-jazzy-camera-ros ros-jazzy-libcamera
    ```
 5. **Build libcamera (Raspberry Pi fork) and camera_ros** in the workspace. The first build
-   takes 15-30 minutes on a Pi:
+   takes about 20-40 minutes on a Pi 4:
    ```bash
    sudo apt install -y python3-colcon-meson meson ninja-build pkg-config python3-yaml python3-ply \
      python3-jinja2 libyaml-dev libgnutls28-dev openssl libdw-dev libunwind-dev libudev-dev \
@@ -109,14 +112,15 @@ or the Pi 5. Pi cameras need **Raspberry Pi's libcamera fork**, built from sourc
    vcs import src < camera.repos            # clones raspberrypi/libcamera into src/libcamera
    rosdep install -y --from-paths src --ignore-src --rosdistro jazzy --skip-keys=libcamera
    colcon build --packages-select libcamera --meson-args \
-     -Dpipelines=rpi/vc4,rpi/pisp -Dipas=rpi/vc4,rpi/pisp -Dcam=enabled \
+     -Dpipelines=rpi/vc4 -Dipas=rpi/vc4 -Dcam=enabled \
      -Dgstreamer=disabled -Dqcam=disabled -Dpycamera=disabled -Ddocumentation=disabled \
      -Dtest=false -Dlc-compliance=disabled
    colcon build --symlink-install           # camera_ros and the rest; later builds just use this
    source install/setup.bash
    ```
-   If the Pi runs out of memory while building, add `--parallel-workers 1` and
-   `--executor sequential`.
+   (`rpi/vc4` is the Pi 4's camera pipeline.) If the Pi runs out of memory while building
+   (likely on a 1-2 GB Pi 4), add `--executor sequential`, and if it still fails, add swap:
+   `sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`.
 6. **Test it**:
    ```bash
    cam -l                                   # must list the camera, e.g. 'imx708_wide'

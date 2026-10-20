@@ -6,7 +6,7 @@ loads as Claude's system prompt at start-up.
 
 ## What this is
 
-A Raspberry Pi differential-drive robot whose navigation decisions come from Claude.
+A Raspberry Pi 4 differential-drive robot whose navigation decisions come from Claude.
 It fuses an **RPi Camera**, a **Witmotion/M1CT D05 dTOF LiDAR** (360°, `/scan`) and a
 **front HC-SR04 ultrasonic** sensor, asks Claude where to go, and drives an L298N motor
 board with smooth, continuous motion.
@@ -123,7 +123,8 @@ Most important on a new robot:
   (README, "LiDAR").
 - RPi Camera via `camera_ros`, which needs Raspberry Pi's libcamera fork on Ubuntu
   (`ros2_ws/camera.repos`, README "RPi Camera").
-- On a Pi 5, `RPi.GPIO` does not work: install `python3-rpi-lgpio` (drop-in replacement).
+- The robot runs on a **Raspberry Pi 4**. (If it is ever moved to a Pi 5, `RPi.GPIO` stops
+  working: install `python3-rpi-lgpio`, and the camera needs the `rpi/pisp` libcamera pipeline.)
 
 ## Gotchas
 
