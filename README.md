@@ -11,7 +11,7 @@ check, so you know it worked before moving on.
 | | |
 |---|---|
 | **Getting started** | [What you need](#what-you-need) · [1. Ubuntu](#step-1-put-ubuntu-on-the-sd-card) · [2. Connect](#step-2-connect-to-the-pi) · [3. ROS 2 Jazzy](#step-3-install-ros-2-jazzy) · [4. Robot code](#step-4-get-and-build-the-robot-code) · [5. First drive](#step-5-check-the-wiring-and-drive-by-keyboard) · [6. Run Scout](#step-6-let-claude-drive) |
-| **Hardware setup** | [LiDAR](#lidar-setup-witmotion-d05) · [Camera](#rpi-camera-setup) · [Edge sensors](#edge-sensors-stops-falls) · [Motor power](#motor-power-pwm-and-carpet) |
+| **Hardware setup** | [GPIO](#gpio-setup-motors-and-sensors) · [LiDAR](#lidar-setup-witmotion-d05) · [Camera](#rpi-camera-setup) · [Edge sensors](#edge-sensors-stops-falls) · [Motor power](#motor-power-pwm-and-carpet) |
 | **More** | [CLAUDE.md](CLAUDE.md) (Scout's personality and rules) · [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) (how the code works) |
 
 ## What you need
@@ -158,18 +158,20 @@ Copy each block in turn and paste it into the SSH window.
 
 ## Step 4: Get and build the robot code
 
-1. Give your user access to the GPIO pins (motors and sensors) and the USB serial port (LiDAR),
-   and install the Python packages the robot needs:
+1. Set up GPIO (the pins the motors and sensors use) and the USB serial port (LiDAR), and
+   install the Python packages the robot needs. [GPIO setup](#gpio-setup-motors-and-sensors)
+   explains each line:
    ```bash
    sudo usermod -aG dialout,video $USER
    echo 'SUBSYSTEM=="gpio", KERNEL=="gpiochip*", GROUP="dialout", MODE="0660"' | \
        sudo tee /etc/udev/rules.d/99-gpio.rules
-   sudo apt install -y python3-pip python3-rpi-lgpio
+   sudo apt remove -y python3-rpi.gpio
+   sudo apt install -y python3-pip python3-rpi-lgpio gpiod
    pip install --break-system-packages -U anthropic
+   echo 'export LG_WD=/tmp' >> ~/.bashrc
    sudo reboot
    ```
-   `python3-rpi-lgpio` provides the `RPi.GPIO` library the robot's code uses, in a version that
-   works on Ubuntu 24.04. After the reboot, `ssh` in again.
+   After the reboot, `ssh` in again.
 2. Download the code and the LiDAR and camera drivers:
    ```bash
    git clone https://github.com/jjah0001/LLM-Controlled-Robot.git ~/LLM-Controlled-Robot
@@ -186,12 +188,13 @@ Copy each block in turn and paste it into the SSH window.
    It's fine if the build reports that `camera_ros` failed. The camera needs extra steps,
    covered in [RPi Camera setup](#rpi-camera-setup). The rest of the robot works without it.
    If anything else fails, read the first error it prints.
-4. **Check the GPIO pins work** without `sudo`:
+4. **Check GPIO** (no `sudo`, and with nothing else running):
    ```bash
-   python3 -c "import RPi.GPIO as G; G.setmode(G.BCM); G.setup(17, G.OUT); G.cleanup(); print('GPIO OK')"
+   python3 ~/LLM-Controlled-Robot/tools/gpio_check.py
    ```
-   It should print `GPIO OK`. If it says `Permission denied`, check that you rebooted after
-   item 1, and that `ls -l /dev/gpiochip0` shows `dialout`.
+   It checks the library, the permissions and every sensor pin, and ends with
+   `GPIO looks good.` If it reports a problem, it says how to fix it. See
+   [GPIO setup](#gpio-setup-motors-and-sensors) for more.
 
 To get updates later: `cd ~/LLM-Controlled-Robot && git pull`, then repeat the `colcon build`
 line in `ros2_ws`.
@@ -213,7 +216,13 @@ GPIO (BCM) number in brackets. [pinout.xyz](https://pinout.xyz/) shows where eac
 | Camera | Ribbon cable in the CAMERA connector. See [RPi Camera setup](#rpi-camera-setup) |
 | Edge sensors (optional) | See [Edge sensors](#edge-sensors-stops-falls) |
 
-Then drive the motors with the keyboard. In one terminal, start the motor driver:
+First spin each wheel on its own, without ROS. Each wheel turns forward for a second, then
+backward:
+```bash
+python3 ~/LLM-Controlled-Robot/tools/gpio_check.py --motors
+```
+
+Then drive the motors through ROS with the keyboard. In one terminal, start the motor driver:
 ```bash
 ros2 run motor_driver motor_driver_node --ros-args \
   --params-file ~/LLM-Controlled-Robot/ros2_ws/src/claude_ros/config/robot.yaml
@@ -268,6 +277,64 @@ Useful options, added to the end of the launch line:
 
 All the settings are in `ros2_ws/src/claude_ros/config/robot.yaml`. To change Scout's
 personality and rules, edit [CLAUDE.md](CLAUDE.md). Both take effect the next time you launch.
+
+## GPIO setup (motors and sensors)
+
+The motors, the front ultrasonic and the edge sensors are wired to the Pi's GPIO pins. The
+robot's code uses the `RPi.GPIO` library. On Ubuntu 24.04 the classic version of that library
+often fails with errors such as `Cannot determine SOC peripheral base address`, or only works
+with `sudo`. The fix is **`python3-rpi-lgpio`**, a drop-in replacement from Ubuntu that
+provides the same `RPi.GPIO` but uses the standard Linux GPIO device (`/dev/gpiochip0`). The
+robot's code doesn't change, and nothing needs `sudo`.
+
+Step 4 already does all of this. Here is what each part does, so you can check it or redo it:
+
+1. **Use the right library.** Remove the classic one and install the replacement, plus
+   `gpiod` for the `gpioinfo` tool:
+   ```bash
+   sudo apt remove -y python3-rpi.gpio
+   sudo apt install -y python3-rpi-lgpio gpiod
+   ```
+   A copy of `RPi.GPIO` installed with `pip` would hide the Ubuntu one. Check with
+   `pip list 2>/dev/null | grep -i rpi`: it must print nothing. If it lists `RPi.GPIO`, run
+   `pip uninstall --break-system-packages RPi.GPIO`.
+2. **Allow your user to use the pins.** The robot's nodes run as your user, never as root.
+   This rule gives the `dialout` group access to the GPIO device, and adds you to that group:
+   ```bash
+   echo 'SUBSYSTEM=="gpio", KERNEL=="gpiochip*", GROUP="dialout", MODE="0660"' | \
+       sudo tee /etc/udev/rules.d/99-gpio.rules
+   sudo usermod -aG dialout $USER
+   sudo reboot
+   ```
+   After the reboot, `groups` must list `dialout`, and `ls -l /dev/gpiochip0` must show
+   `crw-rw----` with `dialout`.
+3. **Give lgpio a folder for its temporary files.** lgpio creates small `.lgd-nfy*` files in
+   the folder a program runs from. `export LG_WD=/tmp` (added to `~/.bashrc` in Step 4) keeps
+   them in `/tmp` instead, so a robot started from any folder works.
+4. **Run the check**, with no other robot program running:
+   ```bash
+   python3 ~/LLM-Controlled-Robot/tools/gpio_check.py            # library, permissions, sensors
+   python3 ~/LLM-Controlled-Robot/tools/gpio_check.py --motors   # also spins each wheel: lift the robot!
+   ```
+
+**Rules that avoid most GPIO bugs with ROS:**
+- **Never run ROS with `sudo`.** Root doesn't have your ROS setup, and it hides permission
+  problems that come back later.
+- **Only one program can use a pin at a time.** Stop the robot (**Ctrl+C**) before running
+  `gpio_check.py` or `motor_driver_node` on its own. Don't start a second launch in another
+  terminal. Never run the old `ros2 run ultrasonic_control motor_driver` demo with the robot,
+  because it uses the same motor pins.
+- **A crashed program frees its pins when it exits.** If a pin still seems busy, find and stop
+  what's holding it: `ps aux | grep -E "ros2|python3"`, then `kill <number>`.
+
+| Problem | Fix |
+|---|---|
+| `Cannot determine SOC peripheral base address`, `No access to /dev/mem` or `This module can only be run on a Raspberry Pi!` | The classic `RPi.GPIO` is in use. Do item 1, including the `pip` check. |
+| `can not open gpiochip` or `Permission denied` | Do item 2. Then log out and back in, or reboot, so the group change applies. |
+| `GPIO not allocated` or `GPIO busy` | Another program holds that pin. See the rules above. `gpioinfo` lists each pin and what's using it. |
+| Error mentioning `.lgd-nfy` | Do item 3, then open a new terminal. |
+| The check says OK but a wheel never turns | Not a GPIO problem: check the L298N motor power and that the ENA/ENB jumpers are removed, then see [Motor power](#motor-power-pwm-and-carpet). |
+| The ultrasonic says "no echo" | Check its 5 V supply and the voltage divider on ECHO (Step 5 wiring table). |
 
 ## LiDAR setup (Witmotion D05)
 
