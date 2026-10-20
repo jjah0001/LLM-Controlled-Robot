@@ -167,7 +167,7 @@ Copy each block in turn and paste it into the SSH window.
        sudo tee /etc/udev/rules.d/99-gpio.rules
    sudo apt remove -y python3-rpi.gpio
    sudo apt install -y python3-pip python3-rpi-lgpio gpiod
-   pip install --break-system-packages -U anthropic
+   pip install --break-system-packages -U anthropic "brotli>=1.2"
    echo 'export LG_WD=/tmp' >> ~/.bashrc
    sudo reboot
    ```

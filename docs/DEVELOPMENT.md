@@ -76,7 +76,8 @@ Put new logic there and keep the `*_node.py` files as thin ROS wiring.
 cd ros2_ws
 vcs import src < robot.repos              # D05 LiDAR driver + camera_ros (first time)
 sudo apt install ros-jazzy-cv-bridge python3-opencv python3-numpy
-pip install --break-system-packages -U anthropic   # or use a venv visible to ROS
+pip install --break-system-packages -U anthropic "brotli>=1.2"   # or use a venv visible to ROS
+# brotli: Ubuntu's 1.1 can't decode the API's compressed replies; the SDK reports "Connection error"
 source /opt/ros/jazzy/setup.bash
 colcon build --symlink-install
 source install/setup.bash

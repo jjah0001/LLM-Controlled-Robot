@@ -29,7 +29,7 @@ import cv2
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
@@ -178,8 +178,10 @@ class ClaudeAgentNode(Node):
         self._motor_power = None
         self._history = collections.deque(maxlen=int(g('history_length').value))
 
+        # Reliable, newest frame only: a ~1 MB frame is split into many UDP fragments, and
+        # under load a best-effort reader loses one of them in nearly every frame.
         self.create_subscription(Image, g('image_topic').value, self._image_cb,
-                                 qos_profile_sensor_data)
+                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE))
         self.create_subscription(String, '/perception/summary', self._summary_cb, 10)
         self._intent_pub = self.create_publisher(String, '/claude/intent', 10)
         self._say_pub = self.create_publisher(String, '/claude/say', 10)
