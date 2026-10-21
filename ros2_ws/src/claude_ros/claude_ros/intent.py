@@ -1,9 +1,11 @@
 """The contract between the Claude agent and the motion controller.
 
 Claude answers with a JSON object matching ``DECISION_SCHEMA`` (enforced by the
-API's structured outputs). The motion part (linear, angular, duration_s, reason)
-is published on ``/claude/intent`` as a ``std_msgs/String`` and the motion
-controller executes it smoothly until it expires or a newer one arrives. ``say``
+API's structured outputs). The motion part (linear, angular, turn_deg, duration_s,
+reason) is published on ``/claude/intent`` as a ``std_msgs/String`` and the motion
+controller executes it smoothly until it expires or a newer one arrives. A non-zero
+``turn_deg`` asks for an in-place turn by that angle: the controller turns, then stops
+by itself, so the turn doesn't depend on when the next decision arrives. ``say``
 goes to ``/claude/say``, ``note`` into the robot's memory, and ``floor`` switches
 the motor driver's power mode (``/motor_driver/surface``).
 """
@@ -24,6 +26,11 @@ DECISION_SCHEMA = {
             'type': 'number',
             'description': 'Turn rate as a fraction of max turn rate, -1.0 (full right) '
                            'to 1.0 (full left).',
+        },
+        'turn_deg': {
+            'type': 'number',
+            'description': 'Turn in place by this many degrees and then stop, -180 (right) '
+                           'to 180 (left). 0 = no fixed turn; use linear/angular instead.',
         },
         'duration_s': {
             'type': 'number',
@@ -47,7 +54,8 @@ DECISION_SCHEMA = {
             'description': 'Switch motor power for this floor type, or empty to keep it.',
         },
     },
-    'required': ['linear', 'angular', 'duration_s', 'reason', 'say', 'note', 'floor'],
+    'required': ['linear', 'angular', 'turn_deg', 'duration_s', 'reason', 'say', 'note',
+                 'floor'],
     'additionalProperties': False,
 }
 
@@ -60,11 +68,28 @@ def _finite(v, default=0.0):
     return f if math.isfinite(f) else default
 
 
+# A fixed turn uses |angular| as its rate, within these bounds (fraction of max turn rate).
+TURN_RATE_DEFAULT = 0.5
+TURN_RATE_MIN = 0.3
+MAX_TURN_DEG = 180.0
+
+
 def normalise(data: dict, min_duration: float, max_duration: float) -> dict:
-    """Clamp a decision into safe ranges. Never raises on odd values."""
+    """Clamp a decision into safe ranges. Never raises on odd values.
+
+    A fixed turn (``turn_deg`` != 0) is always in place: linear becomes 0 and angular
+    becomes the turn rate, signed in the turn's direction.
+    """
+    linear = max(-1.0, min(1.0, _finite(data.get('linear'))))
+    angular = max(-1.0, min(1.0, _finite(data.get('angular'))))
+    turn = max(-MAX_TURN_DEG, min(MAX_TURN_DEG, _finite(data.get('turn_deg'))))
+    if turn:
+        rate = max(TURN_RATE_MIN, abs(angular)) if angular else TURN_RATE_DEFAULT
+        linear, angular = 0.0, math.copysign(rate, turn)
     return {
-        'linear': max(-1.0, min(1.0, _finite(data.get('linear')))),
-        'angular': max(-1.0, min(1.0, _finite(data.get('angular')))),
+        'linear': linear,
+        'angular': angular,
+        'turn_deg': turn,
         'duration_s': max(min_duration, min(max_duration,
                                             _finite(data.get('duration_s'), min_duration))),
         'reason': str(data.get('reason', ''))[:200],
@@ -79,7 +104,8 @@ def extras(data: dict) -> tuple:
 
 
 def stop_intent(reason: str) -> dict:
-    return {'linear': 0.0, 'angular': 0.0, 'duration_s': 0.5, 'reason': reason}
+    return {'linear': 0.0, 'angular': 0.0, 'turn_deg': 0.0, 'duration_s': 0.5,
+            'reason': reason}
 
 
 def encode(intent: dict) -> str:

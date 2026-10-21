@@ -52,15 +52,25 @@ bumper and the nearest obstacle in the straight-line path (null = nothing seen).
 (blocked_front, slowing_front, emergency_stop_front, cliff_front, steering_away_from_wall, \
 ...). cliff = the downward edge sensors (edge_ahead / edge_behind true = the floor ends \
 there), or a note that none are installed (then only your camera can spot drops). \
-active_intent = the motion you chose last time and how long it has left.
+active_intent = the motion you chose last time, how long it has left and how far it has \
+turned (turned_deg). heading.heading_deg = which way you face, in degrees from where you \
+started (+ = left), measured by matching LiDAR scans (measured_by "lidar"; "commanded" means \
+the LiDAR is down and it is only a rough guess). \
+heading.turned_recently_deg = how far you turned over the last window_s seconds (+ = left): \
+it shows when you are going round in circles.
 - motor_power: the motors' current floor mode and PWM duty range.
-- recent_decisions_oldest_first: your last few decisions, each with the front clearance at the \
-time. If you kept asking to move but the distances stayed the same, you are probably stalled.
+- recent_decisions_oldest_first: your last few decisions, each with the front clearance and \
+heading at the time. If you kept asking to move but the distances stayed the same, you are \
+probably stalled.
 - memory_notes: notes you saved earlier, oldest first.
 
 Answer with one decision:
 - linear: -1..1 fraction of max forward speed. angular: -1..1 fraction of max turn rate, \
 positive turns left (counter-clockwise).
+- turn_deg: to turn on the spot, give the angle here (-180..180, positive = left) and leave \
+linear 0. The controller turns by that angle at about |angular| (0.5 if you give 0) and then \
+stops by itself, and you decide again once it has finished, from a sharp image. Use 0 when \
+you are not doing a fixed turn: driving, curving (linear with angular) or stopping.
 - duration_s: how long to hold this motion if no newer decision arrives. The next decision \
 usually arrives within {period:.0f}-{horizon:.0f} s, so about {horizon:.0f} s keeps motion \
 continuous; use less for tentative moves.
@@ -72,8 +82,22 @@ motor_power shows the current mode.
 
 The motion controller ramps speed, slows near obstacles and stops on its own, so you choose \
 direction and pace, not low-level safety. If front_clearance_m is under about 0.4 m or the \
-front is blocked, rotate in place (linear 0) toward the most open sector rather than pushing \
+front is blocked, turn in place (turn_deg) toward the most open sector rather than pushing \
 forward. Reverse only when boxed in. If the sensors or image look unreliable, go slowly or stop.
+
+Turning: turn on the spot only with turn_deg, never with angular and linear 0, because your \
+decisions arrive seconds late and an open-ended spin overshoots (angular is for curving while \
+you drive). Each lidar sector is 45 degrees, so to face a sector turn by its angle: \
+front_left 45, left 90, back_left 135, back 180, and the negatives on the right. Prefer turns \
+of 90 degrees or less. After a turn, drive: if front_clearance_m is 0.4 m or more, there is \
+room to move, so go forward slowly (linear about 0.3), curving with angular toward the more \
+open side if you like, even if a wall is in view further ahead; the safety layer slows and \
+stops you near it. Turn again only if the front is under 0.4 m or the way ahead is a hazard \
+(stairs, a person, a cable). consecutive_fixed_turns counts your fixed turns in a row: at 2, \
+your next decision must not be another fixed turn. Once you have turned away from something, \
+don't turn away from it a second time. If turned_recently_deg is beyond about +/-270, you are \
+going round in circles: stop turning, pick the most open sector and drive toward it slowly, \
+or stop and say you are stuck.
 
 Edges: falling is the worst thing that can happen to you, and the LiDAR and front ultrasonic \
 look straight ahead, so they cannot see a drop. If cliff.edge_ahead is true or the flags show \
@@ -178,6 +202,11 @@ class ClaudeAgentNode(Node):
         self._summary_t = -1e9
         self._motor_power = None
         self._history = collections.deque(maxlen=int(g('history_length').value))
+        self._turn_sent_t = 0.0         # when the running fixed turn was published (0 = none)
+        self.max_turn_wait = 15.0       # never wait longer than this for a turn to finish
+        self._turn_done_t = 0.0
+        self._consecutive_turns = 0
+        self.settle_s = 0.5             # pause after a turn before taking the next image
 
         # Reliable, newest frame only: a ~1 MB frame is split into many UDP fragments, and
         # under load a best-effort reader loses one of them in nearly every frame.
@@ -225,11 +254,39 @@ class ClaudeAgentNode(Node):
         while not self._stop_evt.is_set() and rclpy.ok():
             t0 = time.monotonic()
             try:
+                if self._turning():
+                    self._stop_evt.wait(0.1)    # decide again once the fixed turn is done
+                    continue
                 self._decide_once()
             except Exception as e:  # never let the thread die
                 self.get_logger().error(f'Decision loop error: {e}')
                 self._publish(intent_mod.stop_intent('agent error'))
             self._stop_evt.wait(max(0.0, self.period - (time.monotonic() - t0)))
+
+    def _turning(self) -> bool:
+        """True while a fixed turn we published is still running.
+
+        Deciding mid-turn would act on a blurred, out-of-date image and could stack turns.
+        """
+        if not self._turn_sent_t:
+            return False
+        now = time.monotonic()
+        with self._lock:
+            summary, summary_t = self._summary, self._summary_t
+        if now - self._turn_sent_t > self.max_turn_wait or summary is None:
+            self._turn_sent_t = self._turn_done_t = 0.0
+            return False
+        if summary_t < self._turn_sent_t + 0.3:
+            return True                 # the summary predates the turn: wait for a newer one
+        active = summary.get('active_intent') or {}
+        if active.get('turn_deg') and not active.get('turn_done'):
+            return True
+        if not self._turn_done_t:
+            self._turn_done_t = now     # let the robot settle so the next image is sharp
+        if now - self._turn_done_t < self.settle_s:
+            return True
+        self._turn_sent_t = self._turn_done_t = 0.0
+        return False
 
     def _decide_once(self):
         now = time.monotonic()
@@ -252,6 +309,7 @@ class ClaudeAgentNode(Node):
             'motor_power': self._motor_power or 'unknown',
             'camera': 'attached' if b64 else 'unavailable',
             'recent_decisions_oldest_first': list(self._history),
+            'consecutive_fixed_turns': self._consecutive_turns,
             'memory_notes': self.memory.recent(self.memory_recall),
         }
         content.append({'type': 'text', 'text': json.dumps(state)})
@@ -281,6 +339,9 @@ class ClaudeAgentNode(Node):
             return
 
         self._publish(decision)
+        if decision['turn_deg']:
+            self._turn_sent_t = time.monotonic()
+        self._consecutive_turns = self._consecutive_turns + 1 if decision['turn_deg'] else 0
         floor = raw.get('floor') if isinstance(raw, dict) else None
         current = (self._motor_power or {}).get('surface')
         if floor in ('hard_floor', 'carpet') and floor != current:
@@ -296,12 +357,15 @@ class ClaudeAgentNode(Node):
                     self.get_logger().info(f'Remembered: {note}')
             except OSError as e:
                 self.get_logger().warn(f'Could not save note to {self.memory.path}: {e}')
-        entry = {k: decision[k] for k in ('linear', 'angular', 'reason')}
+        entry = {k: decision[k] for k in ('linear', 'angular', 'turn_deg', 'reason')}
         entry['front_clearance_m_at_decision'] = summary.get('front_clearance_m')
+        entry['heading_deg_at_decision'] = (summary.get('heading') or {}).get('heading_deg')
         self._history.append(entry)
-        self.get_logger().info(
-            f'[{latency:.1f}s] lin={decision["linear"]:+.2f} ang={decision["angular"]:+.2f} '
-            f'for {decision["duration_s"]:.1f}s | {decision["reason"]}')
+        motion = (f'turn {decision["turn_deg"]:+.0f}deg at {abs(decision["angular"]):.2f}'
+                  if decision['turn_deg'] else
+                  f'lin={decision["linear"]:+.2f} ang={decision["angular"]:+.2f} '
+                  f'for {decision["duration_s"]:.1f}s')
+        self.get_logger().info(f'[{latency:.1f}s] {motion} | {decision["reason"]}')
 
     def _call_claude(self, content):
         kwargs = dict(
