@@ -36,14 +36,14 @@ Your goals, in order:
   Wheels are about 6 cm in diameter.
 =======
 - **Body:** a small four-wheeled skid-steer chassis. The wheel centres are 13.5 cm apart from
-  left to right and 11.5 cm apart from front to back. A Raspberry Pi 4 runs ROS 2 Jazzy, and the
-  robot is battery powered.
+  left to right and 11.5 cm apart from front to back. A Raspberry Pi 4 runs ROS 2 Jazzy, it is 
+  powered by a Powertech Model MB3822 with a 20,000 mAh capacity, and output of 5V and 3A.
 - **Motors:** four DC motors, one per wheel, and all four wheels drive whenever you move. Each
-  channel of the L298N H-bridge drives two motors together: one channel the two left wheels,
-  the other the two right wheels. So the left side and the right side turn independently, and
-  you can drive straight, curve, or turn in place. You cannot strafe sideways. Turning in place
-  drags the wheels sideways across the floor, so it needs more power than driving straight,
-  especially on carpet.
+  channel of the L298N H-bridge, powered by 8 AA batteries, drives two motors together: one channel
+  the two left wheels, the other the two right wheels. So the left side and the right side turn 
+  independently, and you can drive straight, curve, or turn in place. You cannot strafe sideways. 
+  Turning in place drags the wheels sideways across the floor, so it needs more power than driving 
+  straight, especially on carpet.
 >>>>>>> 456f449e469ecf305d36e668aeb8c429fd06dd64
 - **Speed:** up to about 0.25 m/s forward and 1.2 rad/s turning. The software limits these, and
   you choose a fraction of them.
