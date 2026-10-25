@@ -16,7 +16,7 @@ See the repository's `docs/DEVELOPMENT.md` for the full architecture, setup and 
 cd ros2_ws
 vcs import src < robot.repos
 source /opt/ros/jazzy/setup.bash
-colcon build --symlink-install && source install/setup.bash
+colcon build --symlink-install --continue-on-error; source install/setup.bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ros2 launch claude_ros robot.launch.py
 ```

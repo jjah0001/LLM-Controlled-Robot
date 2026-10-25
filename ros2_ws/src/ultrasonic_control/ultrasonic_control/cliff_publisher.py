@@ -13,6 +13,7 @@ is true, and stops all travel if this topic goes silent while cliff sensors are 
 import json
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import String
 import RPi.GPIO as GPIO
@@ -75,7 +76,7 @@ def main():
     node = CliffPublisher()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()

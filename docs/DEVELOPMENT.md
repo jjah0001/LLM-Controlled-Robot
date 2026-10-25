@@ -38,9 +38,10 @@ latency); a local controller runs at 20 Hz and owns smoothness and safety.
  /camera/image_raw ──┘   (camera_ros)
 ```
 
-- **Decision** (`claude_ros/intent.py`): `{"linear": -1..1, "angular": -1..1, "duration_s",
-  "reason", "say", "note"}`. Motion values are fractions of the controller's `max_linear` /
-  `max_angular` (`angular > 0` = turn left) and go to `/claude/intent`; `say` goes to
+- **Decision** (`claude_ros/intent.py`): `{"linear": -1..1, "angular": -1..1, "turn_deg",
+  "duration_s", "reason", "say", "note", "floor"}`. Motion values are fractions of the
+  controller's `max_linear` / `max_angular` (`angular > 0` = turn left) and go to
+  `/claude/intent`; `say` goes to
   `/claude/say`; `note` is saved to memory. Claude's reply is constrained to this schema with
   structured outputs (`output_config.format`).
 - **Identity and memory**: the system prompt is the repo-root `CLAUDE.md` (found via the
@@ -51,6 +52,20 @@ latency); a local controller runs at 20 Hz and owns smoothness and safety.
   Delete that file to make the robot forget.
 - An intent holds for `duration_s`, so motion continues between decisions. When it expires
   (API down, slow, refused) the controller ramps smoothly to a stop.
+- A non-zero `turn_deg` (-180..180) is a fixed turn: in place, at `|angular|` (default 0.5),
+  slowing near the end and stopping within about 2 degrees of the target, however long Claude
+  takes to answer. The agent doesn't ask Claude again until the turn is done and the robot
+  has settled for half a second.
+- Turning is measured with the LiDAR (`perception.estimate_rotation`): each scan is matched
+  against the previous one to find how far the room rotated. The motors are open loop, and at
+  carpet duty a small turn command runs them near full power, so the commanded rate can be out
+  by a factor of three. Between scans, and when the LiDAR is down, the controller uses the
+  commanded rotation times a scale it learns from the measured turns (`turn_rate_scale`).
+  At carpet duty the robot also coasts 20-30 degrees after the command drops to zero, so a
+  fixed turn stops early by `turn_lead_deg`, learned from how far each turn coasted. Each turn
+  logs `Turn done: asked ..., turned ...`; expect within about 20 degrees on carpet. The summary's `heading`
+  (`heading_deg`, `turned_recently_deg` over `turn_window_s`, `measured_by`) shows Claude
+  which way it faces and whether it is going round in circles.
 - Safety lives only in `claude_ros/control.py`; prompts are not a safety mechanism.
 
 ## Packages
@@ -76,9 +91,10 @@ Put new logic there and keep the `*_node.py` files as thin ROS wiring.
 cd ros2_ws
 vcs import src < robot.repos              # D05 LiDAR driver + camera_ros (first time)
 sudo apt install ros-jazzy-cv-bridge python3-opencv python3-numpy
-pip install --break-system-packages -U anthropic   # or use a venv visible to ROS
+pip install --break-system-packages -U anthropic "brotli>=1.2"   # or use a venv visible to ROS
+# brotli: Ubuntu's 1.1 can't decode the API's compressed replies; the SDK reports "Connection error"
 source /opt/ros/jazzy/setup.bash
-colcon build --symlink-install
+colcon build --symlink-install --continue-on-error   # camera_ros fails until libcamera is built (README)
 source install/setup.bash
 
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -98,7 +114,8 @@ cd ros2_ws/src/ultrasonic_control && python3 -m pytest -q test/test_cliff.py
 Useful checks on the robot:
 - `ros2 topic echo /perception/summary`: fused view the agent sees (sectors, clearances, flags).
 - `ros2 topic pub --once /claude/intent std_msgs/String "{data: '{\"linear\":0.5,\"angular\":0.2,\"duration_s\":3,\"reason\":\"test\"}'}"`:
-  drive by hand through the same safety layer, with the agent disabled.
+  drive by hand through the same safety layer, with the agent disabled. Add `\"turn_deg\":90`
+  (and `linear` 0) to turn 90 degrees left and stop.
 - `ros2 run motor_driver keyboard_controller`: raw teleop (bypasses the safety layer; only with
   the motion controller stopped, since both publish `/cmd_vel`).
 
@@ -147,7 +164,7 @@ Most important on a new robot:
   time.
 - Motor power: `motor_driver_node` validates live parameter changes (`surface`,
   `*_min_duty`, `min_duty`, `max_duty`) and publishes the active setting latched on
-  `/motor_driver/power`. Scout can request a surface via the decision's `floor` field, which
+  `/motor_driver/power`. Ratangga can request a surface via the decision's `floor` field, which
   the agent publishes on `/motor_driver/surface`.
 - Claude API: Python `anthropic` SDK, structured outputs, `fallbacks: "default"` with the
   `server-side-fallback-2026-07-01` beta on models that support it. Handle `stop_reason ==

@@ -37,6 +37,9 @@ class ScanGeometry:
     to_rear_m: float = 0.10         # LiDAR centre -> rear bumper along -x
     half_width_m: float = 0.10      # half the robot's width
     corridor_margin_m: float = 0.05  # extra side margin for the drive corridor
+    # Parts of the robot that stick up into the scan plane: (from_deg, to_deg, max_m) in the
+    # robot frame. Returns inside that arc and closer than max_m are dropped.
+    self_mask: tuple = ()
 
 
 def wrap_angle(a):
@@ -61,6 +64,11 @@ def scan_to_polar(ranges, angle_min, angle_increment, range_min, range_max,
     lo = max(float(range_min), geometry.self_filter_m)
     hi = float(range_max) if range_max and range_max > 0 else math.inf
     valid = np.isfinite(r) & (r > lo) & (r <= hi)
+    for start_deg, end_deg, max_m in geometry.self_mask:
+        start = math.radians(start_deg)
+        width = (math.radians(end_deg) - start) % (2 * math.pi)
+        inside = ((ang - start) % (2 * math.pi)) <= width
+        valid &= ~(inside & (r <= max_m))
     return ang[valid], r[valid]
 
 
@@ -137,3 +145,54 @@ def fuse_front(lidar_front, ultrasonic_m, ultrasonic_to_front_m: float = 0.0):
     if ultrasonic_m is not None and math.isfinite(ultrasonic_m):
         candidates.append(max(0.0, ultrasonic_m - ultrasonic_to_front_m))
     return min(candidates) if candidates else None
+
+
+def range_profile(angles: np.ndarray, ranges: np.ndarray, bin_deg: float = 1.0):
+    """Nearest return per ``bin_deg`` slice all round the robot; nan where a slice is empty.
+
+    Puts every scan on the same angle grid, whatever the driver's beam count, so two scans
+    can be compared by shifting one against the other.
+    """
+    n = int(round(360.0 / bin_deg))
+    idx = np.floor(np.mod(np.degrees(angles), 360.0) / bin_deg).astype(int) % n
+    profile = np.full(n, np.inf)
+    np.minimum.at(profile, idx, ranges)
+    profile[np.isinf(profile)] = np.nan
+    return profile
+
+
+def estimate_rotation(prev: np.ndarray, cur: np.ndarray, max_deg: float = 45.0,
+                      bin_deg: float = 1.0, min_overlap: float = 0.3,
+                      outlier_m: float = 0.3):
+    """How far the robot turned (rad, + = left) between two range profiles.
+
+    Turning left by a moves everything a clockwise in the robot frame, so the current
+    profile matches the previous one read a further a round: cur[i] ~ prev[i + a]. Tries
+    every whole-bin shift up to ``max_deg`` and refines the best one to a fraction of a
+    bin. Assumes the robot turned more or less in place (true for fixed turns; a little
+    off while driving). Returns None when too few slices overlap to tell.
+    """
+    n = cur.size
+    shifts = np.arange(-int(max_deg / bin_deg), int(max_deg / bin_deg) + 1)
+    shifted = prev[(np.arange(n)[None, :] + shifts[:, None]) % n]
+    diff = np.abs(cur[None, :] - shifted)
+    ok = ~np.isnan(diff)
+    count = ok.sum(axis=1)
+    # Mean mismatch per shift, each slice capped so a moving person can't dominate it.
+    cost = np.where(ok, np.minimum(np.nan_to_num(diff), outlier_m), 0.0).sum(axis=1)
+    cost = np.where(count >= min_overlap * n, cost / np.maximum(count, 1), np.inf)
+    best = int(np.argmin(cost))
+    if not np.isfinite(cost[best]):
+        return None
+    offset = 0.0
+    if 0 < best < shifts.size - 1 and np.isfinite(cost[best - 1]) and np.isfinite(
+            cost[best + 1]):
+        left, mid, right = cost[best - 1], cost[best], cost[best + 1]
+        curve = left - 2.0 * mid + right
+        if curve > 1e-12:
+            offset = _clamp_half(0.5 * (left - right) / curve)
+    return math.radians((shifts[best] + offset) * bin_deg)
+
+
+def _clamp_half(v: float) -> float:
+    return max(-0.5, min(0.5, v))

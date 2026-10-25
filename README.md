@@ -1,6 +1,6 @@
 # LLM-Controlled-Robot
 
-**Scout** is a small Raspberry Pi 4 robot that asks Claude where to go. It combines a camera,
+**Ratangga** is a small Raspberry Pi 4 robot that asks Claude where to go. It combines a camera,
 a 360° LiDAR and a front ultrasonic sensor, and it drives smoothly while a local safety layer
 keeps it off walls, people and edges. It runs ROS 2 Jazzy on Ubuntu 24.04.
 
@@ -10,9 +10,9 @@ check, so you know it worked before moving on.
 
 | | |
 |---|---|
-| **Getting started** | [What you need](#what-you-need) · [1. Ubuntu](#step-1-put-ubuntu-on-the-sd-card) · [2. Connect](#step-2-connect-to-the-pi) · [3. ROS 2 Jazzy](#step-3-install-ros-2-jazzy) · [4. Robot code](#step-4-get-and-build-the-robot-code) · [5. First drive](#step-5-check-the-wiring-and-drive-by-keyboard) · [6. Run Scout](#step-6-let-claude-drive) |
+| **Getting started** | [What you need](#what-you-need) · [1. Ubuntu](#step-1-put-ubuntu-on-the-sd-card) · [2. Connect](#step-2-connect-to-the-pi) · [3. ROS 2 Jazzy](#step-3-install-ros-2-jazzy) · [4. Robot code](#step-4-get-and-build-the-robot-code) · [5. First drive](#step-5-check-the-wiring-and-drive-by-keyboard) · [6. Run Ratangga](#step-6-let-claude-drive) |
 | **Hardware setup** | [GPIO](#gpio-setup-motors-and-sensors) · [LiDAR](#lidar-setup-witmotion-d05) · [Camera](#rpi-camera-setup) · [Edge sensors](#edge-sensors-stops-falls) · [Motor power](#motor-power-pwm-and-carpet) |
-| **More** | [CLAUDE.md](CLAUDE.md) (Scout's personality and rules) · [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) (how the code works) |
+| **More** | [CLAUDE.md](CLAUDE.md) (Ratangga's personality and rules) · [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) (how the code works) |
 
 ## What you need
 
@@ -42,7 +42,7 @@ Jazzy packages are built for Ubuntu 24.04 only.
    Pick "Server", not "Desktop": the robot has no screen, and Server leaves more memory free.
 4. **Choose Storage:** your microSD card. Everything on it will be erased.
 5. Click **Next**, then **Edit Settings** when asked about OS customisation:
-   - **General:** set the hostname to `scout`, choose a username (for example `robot`) and a
+   - **General:** set the hostname to `ratangga`, choose a username (for example `robot`) and a
      password, enter your Wi-Fi name and password, and set your Wi-Fi country and time zone.
    - **Services:** tick **Enable SSH** and "Use password authentication".
    - Click **Save**, then **Yes** to apply the settings, then **Yes** to write the card.
@@ -81,7 +81,7 @@ In Step 2, the username is `ubuntu` instead of `robot`, so use it wherever this 
 device list (it shows up as `ubuntu`) and connect with, for example,
 `ssh ubuntu@192.168.1.42`. The first password is `ubuntu`, and Ubuntu makes you choose a new
 one straight away and then logs you out, so connect again with the new password. Then run
-`sudo hostnamectl set-hostname scout`, so `scout.local` works after Step 2's reboot. With no Wi-Fi at all, you can plug the
+`sudo hostnamectl set-hostname ratangga`, so `ratangga.local` works after Step 2's reboot. With no Wi-Fi at all, you can plug the
 Pi into your router with an Ethernet cable instead.
 
 ## Step 2: Connect to the Pi
@@ -92,14 +92,14 @@ Pi into your router with an Ethernet cable instead.
 2. On your computer, open a terminal: **Terminal** on a Mac, **PowerShell** on Windows. Then
    connect with the username you chose:
    ```bash
-   ssh robot@scout.local
+   ssh robot@ratangga.local
    ```
    Type `yes` the first time it asks about the fingerprint, then your password. Your prompt
-   changes to `robot@scout:~$`, which means you are now typing **on the Pi**.
+   changes to `robot@ratangga:~$`, which means you are now typing **on the Pi**.
 
-   If `scout.local` isn't found, look up the Pi's IP address in your Wi-Fi router's app or
-   admin page (it's listed as `scout`) and use that, for example `ssh robot@192.168.1.42`.
-3. Make `scout.local` always work, and bring the Pi up to date (this takes a few minutes):
+   If `ratangga.local` isn't found, look up the Pi's IP address in your Wi-Fi router's app or
+   admin page (it's listed as `ratangga`) and use that, for example `ssh robot@192.168.1.42`.
+3. Make `ratangga.local` always work, and bring the Pi up to date (this takes a few minutes):
    ```bash
    sudo apt update && sudo apt full-upgrade -y
    sudo apt install -y avahi-daemon git curl
@@ -152,7 +152,7 @@ Copy each block in turn and paste it into the SSH window.
    ```bash
    ros2 run demo_nodes_py talker
    ```
-   Open a **second** terminal on your computer, `ssh robot@scout.local` again, and run
+   Open a **second** terminal on your computer, `ssh robot@ratangga.local` again, and run
    `ros2 run demo_nodes_py listener`. If the second window prints `I heard: [Hello World: 1]`
    and counts up, ROS 2 works. Press **Ctrl+C** in both windows to stop.
 
@@ -167,7 +167,7 @@ Copy each block in turn and paste it into the SSH window.
        sudo tee /etc/udev/rules.d/99-gpio.rules
    sudo apt remove -y python3-rpi.gpio
    sudo apt install -y python3-pip python3-rpi-lgpio gpiod
-   pip install --break-system-packages -U anthropic
+   pip install --break-system-packages -U anthropic "brotli>=1.2"
    echo 'export LG_WD=/tmp' >> ~/.bashrc
    sudo reboot
    ```
@@ -181,13 +181,16 @@ Copy each block in turn and paste it into the SSH window.
 3. Install the dependencies and build. The build takes a few minutes:
    ```bash
    rosdep install -y --from-paths src --ignore-src --rosdistro jazzy --skip-keys=libcamera
-   colcon build --symlink-install
+   colcon build --symlink-install --continue-on-error
    echo "source ~/LLM-Controlled-Robot/ros2_ws/install/setup.bash" >> ~/.bashrc
    source ~/.bashrc
    ```
-   It's fine if the build reports that `camera_ros` failed. The camera needs extra steps,
-   covered in [RPi Camera setup](#rpi-camera-setup). The rest of the robot works without it.
-   If anything else fails, read the first error it prints.
+   On a new Pi the build ends with `5 packages finished` and `1 package failed: camera_ros`.
+   That's expected: the camera needs libcamera, which you build later in
+   [RPi Camera setup](#rpi-camera-setup), and the rest of the robot works without it. Keep
+   `--continue-on-error`: without it, colcon stops building everything else as soon as
+   `camera_ros` fails, and nothing gets installed. If any other package fails, read the first
+   error it prints.
 4. **Check GPIO** (no `sudo`, and with nothing else running):
    ```bash
    python3 ~/LLM-Controlled-Robot/tools/gpio_check.py
@@ -196,8 +199,14 @@ Copy each block in turn and paste it into the SSH window.
    `GPIO looks good.` If it reports a problem, it says how to fix it. See
    [GPIO setup](#gpio-setup-motors-and-sensors) for more.
 
-To get updates later: `cd ~/LLM-Controlled-Robot && git pull`, then repeat the `colcon build`
-line in `ros2_ws`.
+To get updates later, update this repo and the drivers it pulled in, then rebuild:
+```bash
+cd ~/LLM-Controlled-Robot && git pull
+cd ros2_ws
+vcs import src < robot.repos      # puts each driver at the version this repo expects
+vcs pull src/D05_lidar            # the LiDAR driver follows its main branch
+colcon build --symlink-install --continue-on-error
+```
 
 ## Step 5: Check the wiring and drive by keyboard
 
@@ -260,14 +269,14 @@ avoid walls, so do this before letting it drive on its own. Then set up the
    ros2 launch claude_ros robot.launch.py
    ```
    Each decision appears in the log as a line from `claude_agent`, such as
-   `lin=+0.40 ang=+0.10 for 4.0s | Heading for the open doorway`, along with anything Scout
+   `lin=+0.40 ang=+0.10 for 4.0s | Heading for the open doorway`, along with anything Ratangga
    says or remembers. Press **Ctrl+C** to stop it: the motors stop straight away.
 
 Useful options, added to the end of the launch line:
 
 | Option | What it does |
 |---|---|
-| `mission:="Find the kitchen"` | Gives Scout a task. The default is to explore safely. |
+| `mission:="Find the kitchen"` | Gives Ratangga a task. The default is to explore safely. |
 | `use_agent:=false` | Starts the sensors and safety layer without Claude (no API key needed) |
 | `use_camera:=false` / `use_lidar:=false` | Runs without that sensor |
 | `use_cliff:=true` | Turns on the [edge sensors](#edge-sensors-stops-falls) |
@@ -275,7 +284,7 @@ Useful options, added to the end of the launch line:
 | `lidar_port:=/dev/ttyUSB1` | Uses a different LiDAR port |
 | `model:=claude-haiku-5-5` | Uses a faster, cheaper Claude model |
 
-All the settings are in `ros2_ws/src/claude_ros/config/robot.yaml`. To change Scout's
+All the settings are in `ros2_ws/src/claude_ros/config/robot.yaml`. To change Ratangga's
 personality and rules, edit [CLAUDE.md](CLAUDE.md). Both take effect the next time you launch.
 
 ## GPIO setup (motors and sensors)
@@ -357,7 +366,7 @@ on the Pi, in `~/LLM-Controlled-Robot/ros2_ws` (`cd ~/LLM-Controlled-Robot/ros2_
    ```
    The rules also create a stable name: `/dev/sc_mini` (CH340 adapter) or `/dev/sc_m_c`
    (CP210x). Use it as `lidar_port:=/dev/sc_mini` if `ttyUSB0` keeps changing.
-3. **Build it** (the Quick start build already does this):
+3. **Build it** (the Step 4 build already does this):
    ```bash
    colcon build --symlink-install --packages-select m1ct_d2 && source install/setup.bash
    ```
@@ -372,7 +381,7 @@ on the Pi, in `~/LLM-Controlled-Robot/ros2_ws` (`cd ~/LLM-Controlled-Robot/ros2_
    watch the fused view:
    ```bash
    ros2 launch claude_ros robot.launch.py use_agent:=false use_camera:=false
-   ros2 topic echo /perception/summary
+   ros2 topic echo /perception/summary   # in a second terminal
    ```
    Hold a box about 30 cm in front of the robot, and `lidar_sectors_m.front` should drop.
    Then move it to the robot's left, and `left` should drop. If the box shows up in the
@@ -387,6 +396,7 @@ on the Pi, in `~/LLM-Controlled-Robot/ros2_ws` (`cd ~/LLM-Controlled-Robot/ros2_
 |---|---|
 | `Permission denied` on `/dev/ttyUSB0` | Do step 2, then log out and in. |
 | `node_lidar init error` | Wrong port or the LiDAR isn't spinning. Check `ls /dev/ttyUSB*` and the USB cable. |
+| `unrecognized option '--ros-args'`, then `Couldn't parse remap rule` and `process has died` | An old copy of the driver. In `ros2_ws`: `vcs pull src/D05_lidar`, then rebuild. |
 | `[robot.launch] m1ct_d2 not found` | Run `vcs import src < robot.repos` in `ros2_ws`, then rebuild. |
 | Robot thinks something is always in front | The robot's own body is in the scan. Raise `lidar_self_filter_m`. |
 
@@ -435,7 +445,7 @@ Run the commands below on the Pi, in `~/LLM-Controlled-Robot/ros2_ws`.
    sudo apt install -y python3-colcon-meson meson ninja-build pkg-config python3-yaml python3-ply \
      python3-jinja2 libyaml-dev libgnutls28-dev openssl libdw-dev libunwind-dev libudev-dev \
      libevent-dev libdrm-dev libjpeg-dev libtiff-dev nlohmann-json3-dev
-   vcs import src < camera.repos            # clones raspberrypi/libcamera into src/libcamera
+   vcs import src < camera.repos            # clones a tested raspberrypi/libcamera release into src/libcamera
    rosdep install -y --from-paths src --ignore-src --rosdistro jazzy --skip-keys=libcamera
    colcon build --packages-select libcamera --meson-args \
      -Dpipelines=rpi/vc4 -Dipas=rpi/vc4 -Dcam=enabled \
@@ -464,6 +474,7 @@ Run the commands below on the Pi, in `~/LLM-Controlled-Robot/ros2_ws`.
 | Image is zoomed in (Camera Module 2) | Set `sensor_mode: "1640:1232"` under `camera:` in `robot.yaml`. |
 | Image is upside down | Set `orientation: 180` under `camera:` in `robot.yaml`. |
 | `[robot.launch] camera_ros not found` | `camera_ros` didn't build: rerun step 5 and read the first error. |
+| `camera_ros` fails with `libcamera::Span ... is deprecated` | `src/libcamera` or `src/camera_ros` is newer than the tested versions in the `.repos` files. Run `vcs import src < camera.repos && vcs import src < robot.repos`, then all of step 5 again from `rosdep install`. |
 | Need more detail | `LIBCAMERA_LOG_LEVELS=*:DEBUG ros2 run camera_ros camera_node` |
 
 If the camera still won't cooperate, the robot runs without it: launch with
@@ -563,7 +574,7 @@ ros2 topic echo /motor_driver/power                         # what's active now
 
 Type values with a decimal point (`90.0`, not `90`). Invalid values (outside 0-100, or a minimum
 above the maximum) are rejected with a message, and the old value stays.
-Scout can also switch the preset itself. If it keeps asking to move but its distance readings
+Ratangga can also switch the preset itself. If it keeps asking to move but its distance readings
 don't change, it assumes the wheels are stalling and switches to `carpet`. It switches back
 when the camera shows a hard floor again.
 

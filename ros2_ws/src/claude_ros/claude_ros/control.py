@@ -3,7 +3,8 @@
 Pure Python so the behaviour can be unit tested without ROS or hardware.
 
 Pipeline each control tick (default 20 Hz):
-  1. target   = latest intent (or zero once it has expired)
+  1. target   = latest intent (or zero once it has expired). A fixed turn (intent.turn) rotates
+                in place, eases off as it nears the angle, and stops once it gets there
   2. limit    = slow down in proportion to the free space ahead/behind, stop inside stop_distance,
                 and never travel toward an edge (drop) seen by the cliff sensors
   3. steer    = add a small bias away from walls that are close beside the robot
@@ -30,6 +31,8 @@ class ControlLimits:
     avoid_distance: float = 0.15      # m side gap below which steering bias kicks in
     avoid_gain: float = 0.6           # rad/s of bias at zero side gap, at full speed
     max_turn_while_blocked: float = 0.8  # rad/s cap for turning in place near obstacles
+    turn_tolerance: float = math.radians(2.0)  # rad: a fixed turn is done this close to target
+    min_turn_rate: float = 0.35       # rad/s: a fixed turn never creeps slower than this
 
 
 @dataclass
@@ -37,6 +40,7 @@ class Intent:
     linear: float = 0.0     # fraction of max_linear, -1..1
     angular: float = 0.0    # fraction of max_angular, -1..1 (+ = left / CCW)
     expires_at: float = 0.0  # monotonic seconds
+    turn: float = 0.0       # rad to turn in place, then stop (+ = left); 0 = no fixed turn
     reason: str = ''
 
 
@@ -58,6 +62,7 @@ class ControllerState:
     linear: float = 0.0
     angular: float = 0.0
     flags: list = field(default_factory=list)
+    turned: float = 0.0     # rad turned since the current intent arrived (from commanded rate)
 
 
 def clamp(v, lo, hi):
@@ -97,18 +102,35 @@ def ramp(current: float, target: float, accel: float, decel: float, dt: float) -
     return max(target, current - step)
 
 
+def turn_remaining(intent: Intent, turned: float) -> float:
+    """Angle (rad, >= 0 until overshoot) still to go on a fixed turn."""
+    return abs(intent.turn) - math.copysign(1.0, intent.turn) * turned
+
+
 def step(state: ControllerState, intent: Intent, p: Perception, limits: ControlLimits,
          now: float, dt: float) -> ControllerState:
     """Advance the controller one tick and return the new state."""
     flags = []
 
-    if now < intent.expires_at:
-        v_target = clamp(intent.linear, -1.0, 1.0) * limits.max_linear
-        w_target = clamp(intent.angular, -1.0, 1.0) * limits.max_angular
-    else:
+    if now >= intent.expires_at:
         v_target = w_target = 0.0
         if intent.expires_at > 0.0:
             flags.append('intent_expired')
+    elif intent.turn:
+        # Fixed turn: in place, slowing so it can stop at the target angle without overshoot.
+        v_target = 0.0
+        remaining = turn_remaining(intent, state.turned)
+        if remaining <= limits.turn_tolerance:
+            w_target = 0.0
+            flags.append('turn_complete')
+        else:
+            rate = abs(clamp(intent.angular, -1.0, 1.0)) * limits.max_angular
+            stoppable = math.sqrt(2.0 * limits.accel_angular * 2.0 * remaining)
+            rate = max(min(rate, stoppable), min(rate, limits.min_turn_rate))
+            w_target = math.copysign(rate, intent.turn)
+    else:
+        v_target = clamp(intent.linear, -1.0, 1.0) * limits.max_linear
+        w_target = clamp(intent.angular, -1.0, 1.0) * limits.max_angular
 
     # 2. Clearance-based speed limits.
     if v_target > 0.0:
@@ -170,4 +192,4 @@ def step(state: ControllerState, intent: Intent, p: Perception, limits: ControlL
         v = 0.0
         flags.append('emergency_stop_cliff_rear')
 
-    return ControllerState(linear=v, angular=w, flags=flags)
+    return ControllerState(linear=v, angular=w, flags=flags, turned=state.turned + w * dt)

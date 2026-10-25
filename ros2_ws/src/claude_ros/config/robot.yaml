@@ -17,6 +17,9 @@ motion_controller:
     lidar_yaw_offset_deg: 0.0     # rotate the scan so 0 deg is straight ahead
     lidar_reverse: false          # true if left/right come out swapped
     lidar_self_filter_m: 0.05     # ignore returns from the robot's own body
+    # Parts of Ratangga that the LiDAR sees, as from_deg, to_deg, max_m (repeat for more).
+    # Something on the body reads 0.10 m at -178..-170 deg (behind, slightly right) everywhere.
+    lidar_self_mask: [-180.0, -168.0, 0.12]
     lidar_to_front_m: 0.10        # LiDAR centre -> front bumper
     lidar_to_rear_m: 0.10         # LiDAR centre -> rear bumper
     robot_half_width_m: 0.10
@@ -34,6 +37,11 @@ motion_controller:
     avoid_distance: 0.15          # m side gap where wall-avoidance steering starts
     avoid_gain: 0.6               # rad/s of steering at zero gap, full speed
     max_turn_while_blocked: 0.8   # rad/s
+    # Fixed turns (turn_deg) are measured with the LiDAR. Between scans the controller predicts
+    # with the commanded rate times this scale, which it then learns from the measured turns.
+    # Carpet duty spins the robot about 3x faster than commanded; "Turn done" log lines show it.
+    turn_rate_scale: 3.0
+    turn_lead_deg: 25.0           # a turn stops this early because the robot coasts (learned)
 
 claude_agent:
   ros__parameters:
@@ -59,11 +67,11 @@ claude_agent:
 motor_driver:
   ros__parameters:
     max_wheel_speed_mps: 0.30     # wheel speed at 100% duty; calibrate on the floor
-    track_width_m: 0.16           # distance between the two wheels
+    track_width_m: 0.135          # left to right wheel centres (front-rear wheel centres: 0.115)
     # Motor power (PWM duty %). Wheel commands map onto min_duty..max_duty, so min_duty is
     # the power at the slowest speed. Raise it if the wheels stall (e.g. on carpet).
     # Change live:  ros2 param set /motor_driver surface carpet
-    surface: hard_floor           # hard_floor | carpet (Scout can also switch this itself)
+    surface: hard_floor           # hard_floor | carpet (Ratangga can also switch this itself)
     hard_floor_min_duty: 60.0
     carpet_min_duty: 80.0
     min_duty: -1.0                # >= 0 overrides both presets
@@ -95,7 +103,7 @@ camera:                         # camera_ros; setup steps in the README ("RPi Ca
     width: 640
     height: 480
     format: RGB888
-    orientation: 0                # 180 if the camera is mounted upside down
+    orientation: 180              # 180 if the camera is mounted upside down
     # sensor_mode: "1640:1232"    # Camera Module 2: full field of view instead of a crop
 
 lidar:                          # m1ct_d2; setup steps in the README ("LiDAR setup")

@@ -1,3 +1,5 @@
+import math
+
 from claude_ros import control as c
 
 LIM = c.ControlLimits()
@@ -93,3 +95,30 @@ def test_silent_cliff_sensors_block_travel():
     for linear in (1.0, -1.0):
         state, _ = _run(c.Intent(linear=linear, expires_at=100.0), blind, 1.0)
         assert state.linear == 0.0 and 'no_cliff_sensor' in state.flags
+
+
+def test_fixed_turn_stops_at_the_angle():
+    for degrees, rate in ((90.0, 0.5), (-45.0, 0.5), (180.0, 1.0), (10.0, 0.3)):
+        turn = math.radians(degrees)
+        intent = c.Intent(linear=0.0, angular=math.copysign(rate, turn), turn=turn,
+                          expires_at=100.0)
+        state, trace = _run(intent, CLEAR, 8.0)
+        assert state.angular == 0.0 and state.linear == 0.0
+        assert 'turn_complete' in state.flags
+        assert abs(state.turned - turn) <= LIM.turn_tolerance + math.radians(1.0)
+        assert all(abs(s.angular) <= rate * LIM.max_angular + 1e-9 for s in trace)
+
+
+def test_fixed_turn_ignores_linear_and_stops_when_it_expires():
+    intent = c.Intent(linear=1.0, angular=0.5, turn=math.radians(360.0), expires_at=2.0)
+    state, trace = _run(intent, CLEAR, 4.0)
+    assert all(s.linear == 0.0 for s in trace)
+    assert state.angular == 0.0 and 'intent_expired' in state.flags
+
+
+def test_fixed_turn_continues_from_the_angle_already_turned():
+    turn = math.radians(90.0)
+    intent = c.Intent(angular=0.5, turn=turn, expires_at=100.0)
+    half = c.ControllerState(turned=turn - math.radians(1.0))
+    state = c.step(half, intent, CLEAR, LIM, 1.0, 0.05)
+    assert state.angular == 0.0 and 'turn_complete' in state.flags
