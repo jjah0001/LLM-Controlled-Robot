@@ -178,3 +178,12 @@ def test_estimate_rotation_can_search_around_a_guess():
     cur = pc.range_profile(*_room_scan(0.0, 0.0, math.radians(120.0)))
     est = pc.estimate_rotation(key, cur, max_deg=15.0, guess=math.radians(110.0))
     assert abs(math.degrees(est) - 120.0) < 1.5
+
+
+def test_estimate_rotation_follows_a_fast_spin_from_the_predicted_turn():
+    # 100 degrees between two scans: outside the default +/-45 window, so without a guess
+    # the match can only alias. Searching around the commanded prediction finds it.
+    key = pc.range_profile(*_room_scan(0.0, 0.0, 0.0))
+    cur = pc.range_profile(*_room_scan(0.0, 0.0, math.radians(100.0)))
+    est = pc.estimate_rotation(key, cur, guess=math.radians(80.0))
+    assert abs(math.degrees(est) - 100.0) < 1.5

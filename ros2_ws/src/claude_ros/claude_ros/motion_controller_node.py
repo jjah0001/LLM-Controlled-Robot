@@ -56,6 +56,7 @@ class Goal:
     stopped_t: float = 0.0      # when the controller reported this move complete
     blocked: bool = False       # the safety layer held this move back
     measured: bool = True       # every update during this goal came from the LiDAR
+    predicted: float = 0.0      # turn: rad the commands should have turned during this move
     key: object = None          # the LiDAR profile from where the goal started, to match against
     key_heading: float = 0.0
     key_odom: float = 0.0
@@ -84,6 +85,8 @@ class MotionController(Node):
         p('turn_correct_deg', 3.0)
         p('drive_correct_m', 0.025)
         p('max_corrections', 3)
+        p('max_real_turn_rate', 1.5)    # rad/s: cap on how fast the robot really spins (learned
+        #                                 scale), so the LiDAR can follow it between scans
         p('stall_window_s', 1.5)        # moving for this long with no measured motion = stalled
         p('auto_carpet_on_stall', True)  # switch the motors to carpet power when a goal stalls
         p('use_cliff_sensors', False)   # True: no travel unless /cliff is fresh and clear
@@ -126,6 +129,7 @@ class MotionController(Node):
         self.drive_correct = float(g('drive_correct_m').value)
         self.max_corrections = int(g('max_corrections').value)
         self.stall_window = float(g('stall_window_s').value)
+        self.max_real_turn = float(g('max_real_turn_rate').value)
         self.auto_carpet = bool(g('auto_carpet_on_stall').value)
         self.us_to_front = float(g('ultrasonic_to_front_m').value)
         self.use_cliff = bool(g('use_cliff_sensors').value)
@@ -194,6 +198,19 @@ class MotionController(Node):
     def _cal(self) -> cal_mod.Calibration:
         return self.calibrations.get(self._surface)
 
+    def _limits(self) -> control.ControlLimits:
+        """The motion limits, with the turn rate capped so the real spin stays trackable.
+
+        On carpet the robot spins several times faster than commanded. Spinning much more
+        than about 45 degrees between two scans makes the scan match ambiguous (it can lose
+        count of whole turns), and smears each scan, so the commanded rate is scaled down by
+        the learned turn_rate_scale to keep the real rate under max_real_turn_rate.
+        """
+        lim = self.limits
+        cap = self.max_real_turn / max(1e-3, self._cal().turn_scale)
+        return dataclasses.replace(
+            lim, max_angular=max(lim.min_turn_rate, min(lim.max_angular, cap)))
+
     # ── Inputs ────────────────────────────────────────────────────────────────
 
     def _scan_cb(self, msg: LaserScan):
@@ -204,12 +221,17 @@ class MotionController(Node):
             msg.ranges, msg.angle_min, msg.angle_increment, msg.range_min, msg.range_max,
             self.geom)
         profile = perception.range_profile(ang, rng)
-        fresh = self._profile is not None and now - self._profile_t <= self.scan_timeout
-        rot = perception.estimate_rotation(self._profile, profile) if fresh else None
-        self._profile, self._profile_t = profile, now
         cal = self._cal()
         cmd_rot, cmd_lin = self._cmd_rot, self._cmd_lin
         self._cmd_rot = self._cmd_lin = 0.0
+        # A scan can't tell a 10 degree turn from a 370 degree one, or a fast 60 degree step
+        # from a -300 one, so search around the turn predicted from the command, not around 0.
+        fresh = self._profile is not None and now - self._profile_t <= self.scan_timeout
+        rot = perception.estimate_rotation(
+            self._profile, profile, guess=cmd_rot * cal.turn_scale) if fresh else None
+        self._profile, self._profile_t = profile, now
+        if self._goal is not None:
+            self._goal.predicted += abs(cmd_rot) * cal.turn_scale
 
         goal = self._goal
         if goal is not None and goal.kind == 'drive':
@@ -345,7 +367,7 @@ class MotionController(Node):
             command = cal_mod.plan(remaining, cal.turn_lead, 1.5 * self.limits.turn_tolerance)
             # Long enough to finish at the real (learned) rate whatever duration_s says, with
             # room for ramping.
-            rate = pace * self.limits.max_angular * max(0.3, min(1.0, cal.turn_scale))
+            rate = pace * self._limits().max_angular * max(0.3, min(1.0, cal.turn_scale))
             duration = min(self.max_turn, max(duration, 2.0 * abs(command) / rate + 1.0))
             intent = control.Intent(angular=math.copysign(pace, command), turn=command,
                                     expires_at=now + duration, reason=goal.reason)
@@ -355,7 +377,7 @@ class MotionController(Node):
             duration = min(self.max_turn, max(duration, 2.0 * abs(command) / speed + 1.5))
             intent = control.Intent(linear=math.copysign(pace, command), distance=command,
                                     expires_at=now + duration, reason=goal.reason)
-        goal.command, goal.stopped_t, goal.blocked = command, 0.0, False
+        goal.command, goal.stopped_t, goal.blocked, goal.predicted = command, 0.0, False, 0.0
         goal.move_start = self._progress(goal)
         self._begin_intent(intent)
 
@@ -431,6 +453,17 @@ class MotionController(Node):
                     return
                 goal.stopped_t = now        # ran out of time: settle, then check and correct
                 self._stall_log.clear()
+            elif goal.kind == 'turn' and goal.predicted > 3.0 * abs(goal.command) + math.pi / 2:
+                # The commands should have turned the robot far more than the LiDAR says: it
+                # has probably lost count of whole turns. Stop rather than keep spinning.
+                self.get_logger().warn(
+                    f'Turn stopped: commanded about {math.degrees(goal.predicted):.0f} deg of '
+                    f'spin for a {math.degrees(goal.command):+.0f} deg move, but the LiDAR '
+                    f'measured {math.degrees(self._progress(goal) - goal.move_start):+.0f}.')
+                goal.measured = False
+                self._begin_intent(control.Intent(reason='turn lost count'))
+                self._end_goal('lost_count')
+                return
             else:
                 self._check_stall(now, goal)
                 return
@@ -542,7 +575,7 @@ class MotionController(Node):
             self._state,
             turned=self._heading - self._intent_heading + self._cmd_rot * cal.turn_scale,
             driven=self._odom - self._intent_odom + self._cmd_lin * cal.drive_scale)
-        self._state = control.step(self._state, self._intent, p, self.limits, now, dt)
+        self._state = control.step(self._state, self._intent, p, self._limits(), now, dt)
         self._cmd_rot += self._state.angular * dt
         self._cmd_lin += self._state.linear * dt
         self._update_goal(now)

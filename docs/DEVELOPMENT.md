@@ -72,6 +72,14 @@ latency); a local controller runs at 20 Hz and owns smoothness and safety.
   corrected; if the safety layer blocked it, it ends as `blocked`. A goal driven for
   `stall_window_s` with no measured motion switches the motors to carpet power
   (`auto_carpet_on_stall`) and flags `stalled`.
+- Scan matching only knows angles modulo 360 degrees, and a fast spin between two scans can
+  match the wrong way round, so the robot used to lose count of whole turns (spin 370, log
+  10). Three guards stop that: each scan-to-scan match searches around the turn predicted
+  from the command and the learned `turn_rate_scale` instead of around zero; the commanded
+  turn rate is scaled down so the real spin stays under `max_real_turn_rate` (1.5 rad/s, about
+  17 degrees per scan at 5 Hz); and a turn whose commands predict more than three times the
+  move plus 90 degrees while the LiDAR measures far less is stopped and reported as
+  `lost_count`.
 - What is learned (`claude_ros/calibration.py`) is kept per floor (`surface` from
   `/motor_driver/power`): turn and drive speed scales (real / commanded, used between scans and
   when the LiDAR is down) and turn and drive coasts. It is saved to `calibration_file`

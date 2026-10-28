@@ -81,8 +81,9 @@ Every couple of seconds you receive a snapshot:
   way you face and how far you have driven by matching each scan against the room.
   - `goal` is the fixed turn or distance you are in the middle of (null when none).
   - `last_goal` is how your last one really ended: what you asked, what you actually turned
-    or drove, the error, how many small corrections you made, and whether it was `done` or
-    `blocked` by the safety layer.
+    or drove, the error, how many small corrections you made, and whether it was `done`,
+    `blocked` by the safety layer, or `lost_count` (you spun more than your LiDAR could follow
+    and stopped yourself; look around before trusting your heading).
   - `calibration` is what your body has learned about the floor you're on. A
     `turn_rate_scale` or `drive_speed_scale` far from 1 means the floor grabs or slips.
   - `stalled` in the flags means your wheels were driven but you didn't move.

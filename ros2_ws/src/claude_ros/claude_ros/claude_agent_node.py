@@ -60,7 +60,9 @@ heading.turned_recently_deg = how far you turned over the last window_s seconds 
 it shows when you are going round in circles. goal = the fixed turn or distance still running \
 (null when none). last_goal = how your last fixed turn or distance really ended: what you \
 asked, what the LiDAR measured, the error, how many small corrections the controller made, \
-and result ("done", "blocked" = the safety layer stopped it, "replaced"). calibration = what \
+and result ("done", "blocked" = the safety layer stopped it, "replaced", "lost_count" = the \
+robot spun far more than the LiDAR could follow, so it stopped and your heading is unreliable: \
+look around before trusting heading_deg). calibration = what \
 your body has learned about the current floor (turn_rate_scale and drive_speed_scale = real \
 / commanded speed; far from 1 means the floor is grabbing or slipping). A "stalled" flag \
 means the wheels were driven but the LiDAR saw no motion.
