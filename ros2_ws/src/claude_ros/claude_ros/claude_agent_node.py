@@ -57,7 +57,13 @@ turned (turned_deg). heading.heading_deg = which way you face, in degrees from w
 started (+ = left), measured by matching LiDAR scans (measured_by "lidar"; "commanded" means \
 the LiDAR is down and it is only a rough guess). \
 heading.turned_recently_deg = how far you turned over the last window_s seconds (+ = left): \
-it shows when you are going round in circles.
+it shows when you are going round in circles. goal = the fixed turn or distance still running \
+(null when none). last_goal = how your last fixed turn or distance really ended: what you \
+asked, what the LiDAR measured, the error, how many small corrections the controller made, \
+and result ("done", "blocked" = the safety layer stopped it, "replaced"). calibration = what \
+your body has learned about the current floor (turn_rate_scale and drive_speed_scale = real \
+/ commanded speed; far from 1 means the floor is grabbing or slipping). A "stalled" flag \
+means the wheels were driven but the LiDAR saw no motion.
 - motor_power: the motors' current floor mode and PWM duty range.
 - recent_decisions_oldest_first: your last few decisions, each with the front clearance and \
 heading at the time. If you kept asking to move but the distances stayed the same, you are \
@@ -71,6 +77,10 @@ positive turns left (counter-clockwise).
 linear 0. The controller turns by that angle at about |angular| (0.5 if you give 0) and then \
 stops by itself, and you decide again once it has finished, from a sharp image. Use 0 when \
 you are not doing a fixed turn: driving, curving (linear with angular) or stopping.
+- distance_m: to drive straight by a set distance, give it here in metres (-1..2, negative = \
+backward) and leave turn_deg 0. The controller drives at about |linear| (0.4 if you give 0), \
+holds its heading, slows near the end and stops by itself on the spot, and you decide again \
+once it has finished. Use 0 for open-ended driving with linear and angular.
 - duration_s: how long to hold this motion if no newer decision arrives. The next decision \
 usually arrives within {period:.0f}-{horizon:.0f} s, so about {horizon:.0f} s keeps motion \
 continuous; use less for tentative moves.
@@ -84,6 +94,16 @@ The motion controller ramps speed, slows near obstacles and stops on its own, so
 direction and pace, not low-level safety. If front_clearance_m is under about 0.4 m or the \
 front is blocked, turn in place (turn_deg) toward the most open sector rather than pushing \
 forward. Reverse only when boxed in. If the sensors or image look unreliable, go slowly or stop.
+
+Hitting targets: your motors have no encoders and behave differently on every floor, so \
+never time a move ("full speed for 2 s") to cover an angle or a distance. Give the target \
+itself (turn_deg, distance_m): the controller measures the move with the LiDAR, stops early \
+by the coast it has learned for this floor, then checks and makes small corrections, so you \
+end within a few degrees and a few centimetres on any floor. Read the distance off the \
+sensors: to stop about 0.4 m short of something ahead, drive front_clearance_m minus 0.4. \
+Check last_goal before your next move: if it was blocked, look at why instead of repeating \
+it; if its error is still large, allow for it in the next target. Use open-ended linear and \
+angular for smooth cruising and gentle curves when the exact distance doesn't matter.
 
 Turning: turn on the spot only with turn_deg, never with angular and linear 0, because your \
 decisions arrive seconds late and an open-ended spin overshoots (angular is for curving while \
@@ -202,11 +222,11 @@ class ClaudeAgentNode(Node):
         self._summary_t = -1e9
         self._motor_power = None
         self._history = collections.deque(maxlen=int(g('history_length').value))
-        self._turn_sent_t = 0.0         # when the running fixed turn was published (0 = none)
-        self.max_turn_wait = 15.0       # never wait longer than this for a turn to finish
-        self._turn_done_t = 0.0
+        self._goal_sent_t = 0.0         # when the running fixed turn/distance was published
+        self.max_goal_wait = 30.0       # never wait longer than this for one to finish
+        self._goal_done_t = 0.0
         self._consecutive_turns = 0
-        self.settle_s = 0.5             # pause after a turn before taking the next image
+        self.settle_s = 0.2             # pause after a goal before taking the next image
 
         # Reliable, newest frame only: a ~1 MB frame is split into many UDP fragments, and
         # under load a best-effort reader loses one of them in nearly every frame.
@@ -254,8 +274,8 @@ class ClaudeAgentNode(Node):
         while not self._stop_evt.is_set() and rclpy.ok():
             t0 = time.monotonic()
             try:
-                if self._turning():
-                    self._stop_evt.wait(0.1)    # decide again once the fixed turn is done
+                if self._goal_running():
+                    self._stop_evt.wait(0.1)    # decide again once the fixed move is done
                     continue
                 self._decide_once()
             except Exception as e:  # never let the thread die
@@ -263,29 +283,30 @@ class ClaudeAgentNode(Node):
                 self._publish(intent_mod.stop_intent('agent error'))
             self._stop_evt.wait(max(0.0, self.period - (time.monotonic() - t0)))
 
-    def _turning(self) -> bool:
-        """True while a fixed turn we published is still running.
+    def _goal_running(self) -> bool:
+        """True while a fixed turn or distance we published is still running.
 
-        Deciding mid-turn would act on a blurred, out-of-date image and could stack turns.
+        The controller measures it, corrects any error, and reports it done in the summary
+        (goal = null, result in last_goal). Deciding mid-move would act on a blurred,
+        out-of-date image and would cut the move short.
         """
-        if not self._turn_sent_t:
+        if not self._goal_sent_t:
             return False
         now = time.monotonic()
         with self._lock:
             summary, summary_t = self._summary, self._summary_t
-        if now - self._turn_sent_t > self.max_turn_wait or summary is None:
-            self._turn_sent_t = self._turn_done_t = 0.0
+        if now - self._goal_sent_t > self.max_goal_wait or summary is None:
+            self._goal_sent_t = self._goal_done_t = 0.0
             return False
-        if summary_t < self._turn_sent_t + 0.3:
-            return True                 # the summary predates the turn: wait for a newer one
-        active = summary.get('active_intent') or {}
-        if active.get('turn_deg') and not active.get('turn_done'):
+        if summary_t < self._goal_sent_t + 0.3:
+            return True                 # the summary predates the goal: wait for a newer one
+        if summary.get('goal'):
             return True
-        if not self._turn_done_t:
-            self._turn_done_t = now     # let the robot settle so the next image is sharp
-        if now - self._turn_done_t < self.settle_s:
+        if not self._goal_done_t:
+            self._goal_done_t = now     # a moment more so the next image is sharp
+        if now - self._goal_done_t < self.settle_s:
             return True
-        self._turn_sent_t = self._turn_done_t = 0.0
+        self._goal_sent_t = self._goal_done_t = 0.0
         return False
 
     def _decide_once(self):
@@ -339,8 +360,8 @@ class ClaudeAgentNode(Node):
             return
 
         self._publish(decision)
-        if decision['turn_deg']:
-            self._turn_sent_t = time.monotonic()
+        if decision['turn_deg'] or decision['distance_m']:
+            self._goal_sent_t = time.monotonic()
         self._consecutive_turns = self._consecutive_turns + 1 if decision['turn_deg'] else 0
         floor = raw.get('floor') if isinstance(raw, dict) else None
         current = (self._motor_power or {}).get('surface')
@@ -357,14 +378,18 @@ class ClaudeAgentNode(Node):
                     self.get_logger().info(f'Remembered: {note}')
             except OSError as e:
                 self.get_logger().warn(f'Could not save note to {self.memory.path}: {e}')
-        entry = {k: decision[k] for k in ('linear', 'angular', 'turn_deg', 'reason')}
+        entry = {k: decision[k] for k in ('linear', 'angular', 'turn_deg', 'distance_m',
+                                          'reason')}
         entry['front_clearance_m_at_decision'] = summary.get('front_clearance_m')
         entry['heading_deg_at_decision'] = (summary.get('heading') or {}).get('heading_deg')
         self._history.append(entry)
-        motion = (f'turn {decision["turn_deg"]:+.0f}deg at {abs(decision["angular"]):.2f}'
-                  if decision['turn_deg'] else
-                  f'lin={decision["linear"]:+.2f} ang={decision["angular"]:+.2f} '
-                  f'for {decision["duration_s"]:.1f}s')
+        if decision['turn_deg']:
+            motion = f'turn {decision["turn_deg"]:+.0f}deg at {abs(decision["angular"]):.2f}'
+        elif decision['distance_m']:
+            motion = f'drive {decision["distance_m"]:+.2f}m at {abs(decision["linear"]):.2f}'
+        else:
+            motion = (f'lin={decision["linear"]:+.2f} ang={decision["angular"]:+.2f} '
+                      f'for {decision["duration_s"]:.1f}s')
         self.get_logger().info(f'[{latency:.1f}s] {motion} | {decision["reason"]}')
 
     def _call_claude(self, content):

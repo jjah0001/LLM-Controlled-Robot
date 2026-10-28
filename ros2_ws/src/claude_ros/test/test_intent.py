@@ -7,8 +7,8 @@ from claude_ros import intent
 
 def test_normalise_clamps_and_survives_garbage():
     d = intent.normalise({'linear': 3, 'angular': 'x', 'duration_s': 99, 'reason': 1}, 1.0, 6.0)
-    assert d == {'linear': 1.0, 'angular': 0.0, 'turn_deg': 0.0, 'duration_s': 6.0,
-                 'reason': '1'}
+    assert d == {'linear': 1.0, 'angular': 0.0, 'turn_deg': 0.0, 'distance_m': 0.0,
+                 'duration_s': 6.0, 'reason': '1'}
     d = intent.normalise({'linear': float('nan'), 'angular': -2}, 1.0, 6.0)
     assert d['linear'] == 0.0 and d['angular'] == -1.0 and d['duration_s'] == 1.0
 
@@ -50,3 +50,19 @@ def test_no_fixed_turn_leaves_motion_alone():
     d = intent.normalise({'linear': 0.4, 'angular': 0.3, 'turn_deg': 0}, 1.0, 6.0)
     assert (d['linear'], d['angular'], d['turn_deg']) == (0.4, 0.3, 0.0)
     assert intent.decode('{"linear": 0.4}')['turn_deg'] == 0.0    # older senders still work
+
+
+def test_fixed_distance_is_straight_with_a_signed_pace():
+    d = intent.normalise({'linear': 0.0, 'angular': 0.7, 'distance_m': 1.2}, 1.0, 6.0)
+    assert (d['linear'], d['angular'], d['distance_m']) == (intent.DRIVE_PACE_DEFAULT, 0.0, 1.2)
+    d = intent.normalise({'linear': 0.05, 'distance_m': -0.5}, 1.0, 6.0)
+    assert d['linear'] == -intent.DRIVE_PACE_MIN and d['distance_m'] == -0.5
+    d = intent.normalise({'linear': 1.0, 'distance_m': 9.0}, 1.0, 6.0)
+    assert d['distance_m'] == intent.MAX_DRIVE_M
+    assert intent.normalise({'distance_m': -9.0}, 1.0, 6.0)['distance_m'] == -intent.MAX_REVERSE_M
+    assert intent.normalise({'linear': 0.3, 'distance_m': 0.01}, 1.0, 6.0)['distance_m'] == 0.0
+
+
+def test_fixed_turn_wins_over_distance():
+    d = intent.normalise({'turn_deg': 90, 'distance_m': 1.0}, 1.0, 6.0)
+    assert d['distance_m'] == 0.0 and d['linear'] == 0.0 and d['turn_deg'] == 90.0

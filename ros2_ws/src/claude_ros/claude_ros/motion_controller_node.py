@@ -6,9 +6,16 @@ Subscribes:
   ultrasonic/range   sensor_msgs/Range      (front HC-SR04)
   /claude/intent     std_msgs/String        (JSON from claude_agent_node)
   /cliff             std_msgs/String        (JSON from cliff_publisher, when use_cliff_sensors)
+  /motor_driver/power std_msgs/String       (latched JSON: which floor mode the motors are in)
 Publishes:
   /cmd_vel               geometry_msgs/Twist  (every tick, keeps the motor watchdog fed)
   /perception/summary    std_msgs/String      (JSON world summary consumed by the agent)
+  /motor_driver/surface  std_msgs/String      (switches to carpet power if a goal stalls)
+
+Fixed turns (turn_deg) and fixed distances (distance_m) are goals: the controller measures
+them with the LiDAR, stops early by the coast it has learned for the current floor, and once
+the robot has settled it checks the result and makes up to max_corrections small, slow moves
+to close any remaining error. What it learns per floor is saved to calibration_file.
 """
 import collections
 import dataclasses
@@ -20,17 +27,38 @@ import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan, Range
 from std_msgs.msg import String
 
-from claude_ros import control, intent as intent_mod, perception
+from claude_ros import calibration as cal_mod, control, intent as intent_mod, perception
+
+BLOCKING_FLAGS = ('blocked', 'emergency', 'cliff', 'no_forward', 'no_cliff')
 
 
 def self_mask_triples(flat) -> tuple:
     """Group the flat lidar_self_mask parameter into (from_deg, to_deg, max_m) triples."""
     v = [float(x) for x in flat]
     return tuple(tuple(v[i:i + 3]) for i in range(0, len(v) - len(v) % 3, 3))
+
+
+@dataclasses.dataclass
+class Goal:
+    """A fixed turn or distance in progress, across its first move and any corrections."""
+
+    kind: str                   # 'turn' (rad) or 'drive' (m)
+    asked: float                # signed total, from where the goal started
+    start: float                # heading (turn) or odometer (drive) when the goal started
+    reason: str = ''
+    attempt: int = 0            # 0 = first move, then 1.. for corrections
+    command: float = 0.0        # this move's command (asked remainder minus the coast lead)
+    move_start: float = 0.0     # heading / odometer when this move started
+    stopped_t: float = 0.0      # when the controller reported this move complete
+    blocked: bool = False       # the safety layer held this move back
+    measured: bool = True       # every update during this goal came from the LiDAR
+    key: object = None          # the LiDAR profile from where the goal started, to match against
+    key_heading: float = 0.0
+    key_odom: float = 0.0
 
 
 class MotionController(Node):
@@ -43,10 +71,21 @@ class MotionController(Node):
         p('scan_timeout_s', 0.6)
         p('ultrasonic_timeout_s', 0.5)
         p('max_intent_duration_s', 6.0)
-        p('max_turn_duration_s', 12.0)  # a fixed turn that hasn't finished by then is dropped
+        p('max_turn_duration_s', 12.0)  # a fixed turn/distance move unfinished by then is dropped
         p('turn_window_s', 20.0)        # heading.turned_recently_deg covers this many seconds
-        p('turn_rate_scale', 3.0)       # real / commanded turn rate to start from (then learned)
-        p('turn_lead_deg', 25.0)        # how far a turn coasts after stopping (then learned)
+        # Starting calibration for a floor the robot hasn't learned yet (then learned per floor).
+        p('turn_rate_scale', 3.0)       # real / commanded turn rate
+        p('turn_lead_deg', 25.0)        # how far a turn coasts after stopping
+        p('drive_rate_scale', 1.0)      # real / commanded forward speed
+        p('drive_lead_m', 0.03)         # how far a drive coasts after stopping
+        p('calibration_file', '~/.ros/robot_memory/motion_calibration.json')  # '' = don't save
+        # Goal accuracy: after a move settles, correct any error bigger than these.
+        p('settle_s', 0.8)
+        p('turn_correct_deg', 3.0)
+        p('drive_correct_m', 0.025)
+        p('max_corrections', 3)
+        p('stall_window_s', 1.5)        # moving for this long with no measured motion = stalled
+        p('auto_carpet_on_stall', True)  # switch the motors to carpet power when a goal stalls
         p('use_cliff_sensors', False)   # True: no travel unless /cliff is fresh and clear
         p('cliff_timeout_s', 0.3)
         # LiDAR mounting / robot footprint
@@ -82,11 +121,24 @@ class MotionController(Node):
         self.max_intent = float(g('max_intent_duration_s').value)
         self.max_turn = float(g('max_turn_duration_s').value)
         self.turn_window = float(g('turn_window_s').value)
-        self._turn_scale = float(g('turn_rate_scale').value)
-        self._turn_lead = math.radians(float(g('turn_lead_deg').value))
+        self.settle_s = float(g('settle_s').value)
+        self.turn_correct = math.radians(float(g('turn_correct_deg').value))
+        self.drive_correct = float(g('drive_correct_m').value)
+        self.max_corrections = int(g('max_corrections').value)
+        self.stall_window = float(g('stall_window_s').value)
+        self.auto_carpet = bool(g('auto_carpet_on_stall').value)
         self.us_to_front = float(g('ultrasonic_to_front_m').value)
         self.use_cliff = bool(g('use_cliff_sensors').value)
         self.cliff_timeout = float(g('cliff_timeout_s').value)
+        self.calibrations = cal_mod.CalibrationStore(
+            str(g('calibration_file').value), cal_mod.Calibration(
+                turn_scale=float(g('turn_rate_scale').value),
+                turn_lead=math.radians(float(g('turn_lead_deg').value)),
+                drive_scale=float(g('drive_rate_scale').value),
+                drive_lead=float(g('drive_lead_m').value)))
+        if self.calibrations.load_error:
+            self.get_logger().warn(f'Could not read {self.calibrations.path} '
+                                   f'({self.calibrations.load_error}); relearning.')
 
         self._scan = None
         self._scan_t = -math.inf
@@ -94,42 +146,53 @@ class MotionController(Node):
         self._us_t = -math.inf
         self._cliff = {}
         self._cliff_t = -math.inf
+        self._surface = 'hard_floor'      # until /motor_driver/power says otherwise
         self._intent = control.Intent()
         self._state = control.ControllerState()
         self._world = {}
         self._last_tick = time.monotonic()
-        # Turning is measured by matching each LiDAR scan against the previous one: the motors
-        # are open loop and turn far faster than commanded at carpet duty, so the commanded
-        # rate alone can be out by a factor of three. Between scans, and with no LiDAR, the
-        # commanded rotation times a learned scale fills in.
+        # Motion is measured with the LiDAR, because the motors are open loop and run far
+        # faster than commanded at carpet duty. Turning: each scan is matched against the
+        # previous one. Driving a fixed distance: each scan is matched against the scan from
+        # where the drive started. Between scans, and with no LiDAR, the commanded motion
+        # times the floor's learned scale fills in.
         self._heading = 0.0               # rad since start, unwrapped (+ = left)
+        self._odom = 0.0                  # m driven along the body's x axis since start
         self._heading_log = collections.deque()   # (time, heading) for the recent-turn window
         self._profile = None              # previous scan as a range profile
         self._profile_t = -math.inf
-        self._turned = 0.0                # rad measured since the current intent arrived
-        self._cmd_since_scan = 0.0        # rad commanded since the last scan was matched
+        self._cmd_rot = 0.0               # rad commanded since the last scan was matched
+        self._cmd_lin = 0.0               # m commanded since the last scan was matched
         self._heading_source = 'commanded'
-        # The fixed turn in progress: what was asked, how early it stops to allow for coasting,
-        # and when it stopped (to measure the coast once the robot has come to rest).
-        self._turn_target = 0.0           # cleared once the turn has been logged
-        self._turn_asked = 0.0            # the current intent's turn, for the summary
-        self._turn_lead_used = 0.0
-        self._turn_stopped_t = 0.0
+        self._drive_source = 'commanded'
+        self._intent_heading = 0.0        # heading / odometer when the current intent started
+        self._intent_odom = 0.0
+        self._goal = None                 # the fixed turn / distance in progress
+        self._last_goal = None            # how the last one ended, for Claude
+        self._stall_log = collections.deque()     # (time, progress) while a goal is moving
+        self._stalled_t = -math.inf
 
         self.create_subscription(LaserScan, '/scan', self._scan_cb, qos_profile_sensor_data)
         self.create_subscription(Range, 'ultrasonic/range', self._range_cb, 10)
         self.create_subscription(String, '/claude/intent', self._intent_cb, 10)
         if self.use_cliff:
             self.create_subscription(String, '/cliff', self._cliff_cb, 10)
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(String, '/motor_driver/power', self._power_cb, latched)
         self._cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self._summary_pub = self.create_publisher(String, '/perception/summary', 10)
+        self._surface_pub = self.create_publisher(String, '/motor_driver/surface', 10)
 
         self.create_timer(1.0 / float(g('control_rate_hz').value), self._tick)
         self.create_timer(1.0 / float(g('summary_rate_hz').value), self._publish_summary)
         self.get_logger().info(
             f'Motion controller ready: max {self.limits.max_linear:.2f} m/s, '
             f'stop at {self.limits.stop_distance:.2f} m clearance, '
-            f'cliff sensors {"on" if self.use_cliff else "OFF (edges are not detected)"}.')
+            f'cliff sensors {"on" if self.use_cliff else "OFF (edges are not detected)"}, '
+            f'calibrated floors: {sorted(self.calibrations.surfaces) or "none yet"}.')
+
+    def _cal(self) -> cal_mod.Calibration:
+        return self.calibrations.get(self._surface)
 
     # ── Inputs ────────────────────────────────────────────────────────────────
 
@@ -141,28 +204,65 @@ class MotionController(Node):
             msg.ranges, msg.angle_min, msg.angle_increment, msg.range_min, msg.range_max,
             self.geom)
         profile = perception.range_profile(ang, rng)
-        rot = None
-        if self._profile is not None and now - self._profile_t <= self.scan_timeout:
-            rot = perception.estimate_rotation(self._profile, profile)
+        fresh = self._profile is not None and now - self._profile_t <= self.scan_timeout
+        rot = perception.estimate_rotation(self._profile, profile) if fresh else None
         self._profile, self._profile_t = profile, now
-        cmd = self._cmd_since_scan
-        self._cmd_since_scan = 0.0
+        cal = self._cal()
+        cmd_rot, cmd_lin = self._cmd_rot, self._cmd_lin
+        self._cmd_rot = self._cmd_lin = 0.0
+
+        goal = self._goal
+        if goal is not None and goal.kind == 'drive':
+            self._measure_drive(goal, ang, rng, profile, cmd_rot, cmd_lin)
+            return
+        if goal is not None and goal.key is not None:
+            # A fixed turn: match against the turn's first scan, around the chained estimate,
+            # so per-scan errors don't add up over the turn.
+            step = rot if rot is not None else cmd_rot * cal.turn_scale
+            guess = self._heading + step - goal.key_heading
+            total = perception.estimate_rotation(goal.key, profile, max_deg=15.0, guess=guess)
+            if total is not None:
+                self._heading_source = 'lidar'
+                if abs(cmd_rot) >= math.radians(2.0):
+                    measured = goal.key_heading + total - self._heading
+                    cal.turn_scale = cal_mod.learn_scale(cal.turn_scale, measured, cmd_rot)
+                self._heading = goal.key_heading + total
+                self._odom += cmd_lin * cal.drive_scale
+                return
         if rot is None:
             self._heading_source = 'commanded'
-            self._add_rotation(cmd * self._turn_scale)
-            return
-        self._heading_source = 'lidar'
-        if abs(cmd) < math.radians(0.5) and abs(rot) < math.radians(1.0):
-            rot = 0.0                   # standing still: don't let scan noise add up
-        elif abs(cmd) >= math.radians(2.0) and rot * cmd > 0.0:
-            ratio = rot / cmd
-            if 0.2 < ratio < 6.0:
-                self._turn_scale += 0.2 * (ratio - self._turn_scale)
-        self._add_rotation(rot)
+            self._heading += cmd_rot * cal.turn_scale
+            if goal is not None and cmd_rot:
+                goal.measured = False
+        else:
+            self._heading_source = 'lidar'
+            if abs(cmd_rot) < math.radians(0.5) and abs(rot) < math.radians(1.0):
+                rot = 0.0               # standing still: don't let scan noise add up
+            elif abs(cmd_rot) >= math.radians(2.0):
+                cal.turn_scale = cal_mod.learn_scale(cal.turn_scale, rot, cmd_rot)
+            self._heading += rot
+        self._odom += cmd_lin * cal.drive_scale
 
-    def _add_rotation(self, rot: float):
-        self._heading += rot
-        self._turned += rot
+    def _measure_drive(self, goal: Goal, ang, rng, profile, cmd_rot: float, cmd_lin: float):
+        """Distance and heading on a fixed drive, both matched against the drive's first scan."""
+        cal = self._cal()
+        if goal.key is None:
+            goal.key, goal.key_heading, goal.key_odom = profile, self._heading, self._odom
+        driven = self._odom - goal.key_odom
+        turned = self._heading - goal.key_heading + cmd_rot * cal.turn_scale
+        est, rot = perception.estimate_drive(
+            goal.key, ang, rng, rotation=turned, guess=driven + cmd_lin * cal.drive_scale)
+        self._heading = goal.key_heading + rot
+        if est is None:
+            self._drive_source = self._heading_source = 'commanded'
+            goal.measured = False
+            self._odom += cmd_lin * cal.drive_scale
+            return
+        self._drive_source = self._heading_source = 'lidar'
+        if abs(cmd_lin) >= 0.01:
+            cal.drive_scale = cal_mod.learn_scale(cal.drive_scale, est - driven, cmd_lin,
+                                                  gain=0.1)
+        self._odom = goal.key_odom + est
 
     def _range_cb(self, msg: Range):
         r = msg.range
@@ -189,6 +289,16 @@ class MotionController(Node):
         if (cliff['front'] and v > 0.0) or (cliff['rear'] and v < 0.0):
             self._tick()
 
+    def _power_cb(self, msg: String):
+        try:
+            surface = str(json.loads(msg.data)['surface'])
+        except (ValueError, KeyError, TypeError):
+            return
+        if surface != self._surface:
+            self._surface = surface
+            known = 'learned' if surface in self.calibrations.surfaces else 'default'
+            self.get_logger().info(f'Floor is now {surface}: using its {known} calibration.')
+
     def _intent_cb(self, msg: String):
         try:
             d = intent_mod.decode(msg.data, max_duration=self.max_intent)
@@ -196,25 +306,173 @@ class MotionController(Node):
             self.get_logger().warn(f'Ignoring malformed intent ({e}): {msg.data!r}')
             return
         now = time.monotonic()
-        self._finish_turn(now, final=True)
+        if self._goal is not None:
+            self._end_goal('replaced')
         turn = math.radians(d['turn_deg'])
-        duration = d['duration_s']
-        command = 0.0
+        fresh = self._profile is not None and now - self._profile_t <= self.scan_timeout
         if turn:
-            # Long enough to finish the turn whatever duration_s says, with room for ramping.
-            rate = abs(d['angular']) * self.limits.max_angular
-            duration = min(self.max_turn, max(duration, 1.5 * abs(turn) / rate + 1.0))
-            # Stop early by the distance the robot coasts, so it ends up at the angle asked.
-            lead = min(self._turn_lead, 0.7 * abs(turn))
-            command = math.copysign(abs(turn) - lead, turn)
-            self._turn_lead_used = lead
-        self._turn_target = self._turn_asked = turn
-        self._turn_stopped_t = 0.0
-        self._intent = control.Intent(
-            linear=d['linear'], angular=d['angular'], turn=command,
-            expires_at=now + duration, reason=d['reason'])
-        self._turned = 0.0
-        self._state = dataclasses.replace(self._state, turned=0.0)
+            self._goal = Goal('turn', turn, self._heading, reason=d['reason'])
+            if fresh:
+                self._goal.key = self._profile
+                self._goal.key_heading, self._goal.key_odom = self._heading, self._odom
+            self._start_move(now, turn, abs(d['angular']), d['duration_s'])
+        elif d['distance_m']:
+            self._goal = Goal('drive', d['distance_m'], self._odom, reason=d['reason'])
+            if fresh:
+                self._goal.key = self._profile
+                self._goal.key_heading, self._goal.key_odom = self._heading, self._odom
+            self._start_move(now, d['distance_m'], abs(d['linear']), d['duration_s'])
+        else:
+            self._begin_intent(control.Intent(
+                linear=d['linear'], angular=d['angular'],
+                expires_at=now + d['duration_s'], reason=d['reason']))
+
+    # ── Goals: fixed turns and distances ──────────────────────────────────────
+
+    def _progress(self, goal: Goal) -> float:
+        return self._heading if goal.kind == 'turn' else self._odom
+
+    def _begin_intent(self, intent: control.Intent):
+        self._intent = intent
+        self._intent_heading, self._intent_odom = self._heading, self._odom
+        self._state = dataclasses.replace(self._state, turned=0.0, driven=0.0)
+        self._stall_log.clear()
+
+    def _start_move(self, now: float, remaining: float, pace: float, duration: float):
+        """Start the goal's next move: ``remaining`` rad or m at ``pace`` (fraction of max)."""
+        goal, cal = self._goal, self._cal()
+        if goal.kind == 'turn':
+            command = cal_mod.plan(remaining, cal.turn_lead, 1.5 * self.limits.turn_tolerance)
+            # Long enough to finish at the real (learned) rate whatever duration_s says, with
+            # room for ramping.
+            rate = pace * self.limits.max_angular * max(0.3, min(1.0, cal.turn_scale))
+            duration = min(self.max_turn, max(duration, 2.0 * abs(command) / rate + 1.0))
+            intent = control.Intent(angular=math.copysign(pace, command), turn=command,
+                                    expires_at=now + duration, reason=goal.reason)
+        else:
+            command = cal_mod.plan(remaining, cal.drive_lead, 1.5 * self.limits.drive_tolerance)
+            speed = pace * self.limits.max_linear * max(0.3, min(1.0, cal.drive_scale))
+            duration = min(self.max_turn, max(duration, 2.0 * abs(command) / speed + 1.5))
+            intent = control.Intent(linear=math.copysign(pace, command), distance=command,
+                                    expires_at=now + duration, reason=goal.reason)
+        goal.command, goal.stopped_t, goal.blocked = command, 0.0, False
+        goal.move_start = self._progress(goal)
+        self._begin_intent(intent)
+
+    def _settle_goal(self, now: float):
+        """The move has stopped and settled: learn from it, then correct or finish."""
+        goal, cal = self._goal, self._cal()
+        moved = self._progress(goal) - goal.move_start
+        if goal.measured and goal.attempt == 0:
+            # Trust the first measurement on a new floor more than the starting guess.
+            if goal.kind == 'turn':
+                cal.turn_lead = cal_mod.learn_lead(cal.turn_lead, goal.command, moved,
+                                                   cal_mod.MAX_TURN_LEAD,
+                                                   0.8 if cal.turns_learned == 0 else 0.5)
+                cal.turns_learned += 1
+            else:
+                cal.drive_lead = cal_mod.learn_lead(cal.drive_lead, goal.command, moved,
+                                                    cal_mod.MAX_DRIVE_LEAD,
+                                                    0.8 if cal.drives_learned == 0 else 0.5)
+                cal.drives_learned += 1
+            self._save_calibration()
+        error = goal.asked - (self._progress(goal) - goal.start)
+        tolerance = self.turn_correct if goal.kind == 'turn' else self.drive_correct
+        if goal.measured and abs(error) > tolerance and goal.attempt < self.max_corrections:
+            goal.attempt += 1
+            pace = intent_mod.TURN_RATE_MIN if goal.kind == 'turn' else intent_mod.DRIVE_PACE_MIN
+            self._start_move(now, error, pace, 0.0)
+            return
+        self._end_goal('done')
+
+    def _end_goal(self, result: str):
+        goal, self._goal = self._goal, None
+        achieved = self._progress(goal) - goal.start
+        error = goal.asked - achieved
+        source = 'lidar' if goal.measured else 'commanded (rough)'
+        if goal.kind == 'turn':
+            self._last_goal = {'kind': 'turn', 'asked_deg': round(math.degrees(goal.asked)),
+                               'turned_deg': round(math.degrees(achieved)),
+                               'error_deg': round(math.degrees(error))}
+            text = (f'asked {math.degrees(goal.asked):+.0f} deg, turned '
+                    f'{math.degrees(achieved):+.0f} deg')
+        else:
+            self._last_goal = {'kind': 'drive', 'asked_m': round(goal.asked, 2),
+                               'driven_m': round(achieved, 2), 'error_m': round(error, 2)}
+            text = f'asked {goal.asked:+.2f} m, drove {achieved:+.2f} m'
+        self._last_goal.update(result=result, corrections=goal.attempt, measured_by=source)
+        cal = self._cal()
+        self.get_logger().info(
+            f'{goal.kind.capitalize()} {result}: {text} after {goal.attempt} correction(s) '
+            f'({source}; {self._surface}: turn scale {cal.turn_scale:.2f}, turn coast '
+            f'{math.degrees(cal.turn_lead):.0f} deg, drive scale {cal.drive_scale:.2f}, '
+            f'drive coast {100 * cal.drive_lead:.0f} cm)')
+
+    def _save_calibration(self):
+        try:
+            self.calibrations.save()
+        except OSError as e:
+            self.get_logger().warn(f'Could not save calibration: {e}', throttle_duration_sec=60.0)
+
+    def _update_goal(self, now: float):
+        goal = self._goal
+        if goal is None:
+            return
+        flags = self._state.flags
+        if goal.stopped_t == 0.0:
+            if any(f.startswith(BLOCKING_FLAGS) for f in flags):
+                goal.blocked = True
+            if ('turn_complete' if goal.kind == 'turn' else 'drive_complete') in flags:
+                goal.stopped_t = now
+                self._stall_log.clear()
+            elif now >= self._intent.expires_at:
+                if goal.blocked:
+                    self._end_goal('blocked')
+                    return
+                goal.stopped_t = now        # ran out of time: settle, then check and correct
+                self._stall_log.clear()
+            else:
+                self._check_stall(now, goal)
+                return
+        # Settled once the LiDAR has seen no motion for a moment (it can coast for a while on
+        # some floors), or after a few seconds whatever happens.
+        log = self._stall_log
+        log.append((now, self._progress(goal)))
+        while now - log[0][0] > 0.4:
+            log.popleft()
+        still = abs(log[-1][1] - log[0][1]) < (0.003 if goal.kind == 'drive'
+                                               else math.radians(0.5))
+        waited = now - goal.stopped_t
+        if (waited >= self.settle_s and still) or waited >= self.settle_s + 2.5:
+            self._stall_log.clear()
+            self._settle_goal(now)
+
+    def _check_stall(self, now: float, goal: Goal):
+        """Wheels commanded to move but the LiDAR sees no motion: likely too little power."""
+        moving = (abs(self._state.linear) >= 0.04 if goal.kind == 'drive'
+                  else abs(self._state.angular) >= 0.3)
+        source = self._drive_source if goal.kind == 'drive' else self._heading_source
+        if not moving or goal.blocked or source != 'lidar':
+            self._stall_log.clear()
+            return
+        log = self._stall_log
+        log.append((now, self._progress(goal)))
+        if now - log[0][0] < self.stall_window:
+            return
+        moved = abs(log[-1][1] - log[0][1])
+        while now - log[0][0] > self.stall_window:
+            log.popleft()
+        if moved >= (0.01 if goal.kind == 'drive' else math.radians(3.0)):
+            return
+        log.clear()
+        self._stalled_t = now
+        if self.auto_carpet and self._surface != 'carpet':
+            self.get_logger().warn('Wheels stalled during a fixed move: switching to carpet '
+                                   'power.')
+            self._surface_pub.publish(String(data='carpet'))
+        else:
+            self.get_logger().warn('Wheels stalled during a fixed move.',
+                                   throttle_duration_sec=5.0)
 
     # ── Fusion ────────────────────────────────────────────────────────────────
 
@@ -270,18 +528,24 @@ class MotionController(Node):
 
         p = self._fuse(now)
         prev_flags = set(self._state.flags)
-        if now - self._scan_t > self.scan_timeout and self._cmd_since_scan:
-            self._heading_source = 'commanded'          # no LiDAR: dead reckoning only
-            self._add_rotation(self._cmd_since_scan * self._turn_scale)
-            self._cmd_since_scan = 0.0
-        # Measured turn so far, plus a prediction for the time since the last scan.
+        cal = self._cal()
+        if now - self._scan_t > self.scan_timeout:      # no LiDAR: dead reckoning only
+            if self._cmd_rot or self._cmd_lin:
+                self._heading_source = self._drive_source = 'commanded'
+                if self._goal is not None:
+                    self._goal.measured = False
+            self._heading += self._cmd_rot * cal.turn_scale
+            self._odom += self._cmd_lin * cal.drive_scale
+            self._cmd_rot = self._cmd_lin = 0.0
+        # Measured motion so far, plus a prediction for the time since the last scan.
         self._state = dataclasses.replace(
-            self._state, turned=self._turned + self._cmd_since_scan * self._turn_scale)
+            self._state,
+            turned=self._heading - self._intent_heading + self._cmd_rot * cal.turn_scale,
+            driven=self._odom - self._intent_odom + self._cmd_lin * cal.drive_scale)
         self._state = control.step(self._state, self._intent, p, self.limits, now, dt)
-        self._cmd_since_scan += self._state.angular * dt
-        if 'turn_complete' in self._state.flags and 'turn_complete' not in prev_flags:
-            self._turn_stopped_t = now
-        self._finish_turn(now)
+        self._cmd_rot += self._state.angular * dt
+        self._cmd_lin += self._state.linear * dt
+        self._update_goal(now)
         for f in set(self._state.flags) - prev_flags:
             if f.startswith(('emergency', 'blocked', 'no_', 'cliff')):
                 front = self._world.get('front_clearance_m')
@@ -291,24 +555,6 @@ class MotionController(Node):
         msg.linear.x = float(self._state.linear)
         msg.angular.z = float(self._state.angular)
         self._cmd_pub.publish(msg)
-
-    def _finish_turn(self, now: float, final: bool = False):
-        """Once a fixed turn has stopped and settled, log it and learn how far it coasted."""
-        if not self._turn_target or not self._turn_stopped_t:
-            return
-        if not final and now - self._turn_stopped_t < 0.8:
-            return
-        asked, turned = self._turn_target, self._turned
-        self._turn_target = 0.0
-        if self._heading_source == 'lidar':
-            along = math.copysign(abs(turned), turned * asked)   # + = in the asked direction
-            coast = along - (abs(asked) - self._turn_lead_used)
-            self._turn_lead = max(0.0, min(math.radians(60.0), self._turn_lead + 0.5 * (
-                coast - self._turn_lead)))
-        self.get_logger().info(
-            f'Turn done: asked {math.degrees(asked):+.0f} deg, turned '
-            f'{math.degrees(turned):+.0f} deg ({self._heading_source}; turn rate scale '
-            f'{self._turn_scale:.2f}, stops {math.degrees(self._turn_lead):.0f} deg early)')
 
     def _publish_summary(self):
         now = time.monotonic()
@@ -326,18 +572,39 @@ class MotionController(Node):
             'window_s': self.turn_window,
             'measured_by': self._heading_source,
         }
-        summary['controller_flags'] = self._state.flags
-        active = {
+        flags = list(self._state.flags)
+        if now - self._stalled_t < 3.0:
+            flags.append('stalled')
+        summary['controller_flags'] = flags
+        summary['active_intent'] = {
             'linear': self._intent.linear, 'angular': self._intent.angular,
             'remaining_s': round(max(0.0, self._intent.expires_at - now), 1),
             'turned_deg': round(math.degrees(self._state.turned)),
+            'driven_m': round(self._state.driven, 2),
             'reason': self._intent.reason,
         }
-        if self._intent.turn:
-            active['turn_deg'] = round(math.degrees(self._turn_asked))
-            active['turn_done'] = (
-                'turn_complete' in self._state.flags or now >= self._intent.expires_at)
-        summary['active_intent'] = active
+        goal = self._goal
+        if goal is not None:
+            so_far = self._progress(goal) - goal.start
+            if goal.kind == 'turn':
+                active = {'kind': 'turn', 'asked_deg': round(math.degrees(goal.asked)),
+                          'so_far_deg': round(math.degrees(so_far))}
+            else:
+                active = {'kind': 'drive', 'asked_m': round(goal.asked, 2),
+                          'so_far_m': round(so_far, 2)}
+            active['state'] = ('settling' if goal.stopped_t else
+                               'correcting' if goal.attempt else 'moving')
+            summary['goal'] = active
+        else:
+            summary['goal'] = None
+        summary['last_goal'] = self._last_goal
+        cal = self._cal()
+        summary['calibration'] = {
+            'floor': self._surface,
+            'learned_from': f'{cal.turns_learned} turns, {cal.drives_learned} drives',
+            'turn_rate_scale': round(cal.turn_scale, 2),
+            'drive_speed_scale': round(cal.drive_scale, 2),
+        }
         summary['limits'] = {'max_linear_mps': self.limits.max_linear,
                              'max_angular_radps': self.limits.max_angular,
                              'stop_distance_m': self.limits.stop_distance}
