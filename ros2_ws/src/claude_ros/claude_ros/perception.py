@@ -163,17 +163,20 @@ def range_profile(angles: np.ndarray, ranges: np.ndarray, bin_deg: float = 1.0):
 
 def estimate_rotation(prev: np.ndarray, cur: np.ndarray, max_deg: float = 45.0,
                       bin_deg: float = 1.0, min_overlap: float = 0.3,
-                      outlier_m: float = 0.3):
+                      outlier_m: float = 0.3, guess: float = 0.0):
     """How far the robot turned (rad, + = left) between two range profiles.
 
     Turning left by a moves everything a clockwise in the robot frame, so the current
     profile matches the previous one read a further a round: cur[i] ~ prev[i + a]. Tries
     every whole-bin shift up to ``max_deg`` and refines the best one to a fraction of a
     bin. Assumes the robot turned more or less in place (true for fixed turns; a little
-    off while driving). Returns None when too few slices overlap to tell.
+    off while driving). Returns None when too few slices overlap to tell. ``guess`` (rad)
+    centres the search, so a scan from the start of a long turn can be matched within a
+    narrow window around the predicted angle.
     """
     n = cur.size
-    shifts = np.arange(-int(max_deg / bin_deg), int(max_deg / bin_deg) + 1)
+    centre = int(round(math.degrees(guess) / bin_deg))
+    shifts = centre + np.arange(-int(max_deg / bin_deg), int(max_deg / bin_deg) + 1)
     shifted = prev[(np.arange(n)[None, :] + shifts[:, None]) % n]
     diff = np.abs(cur[None, :] - shifted)
     ok = ~np.isnan(diff)
@@ -196,3 +199,91 @@ def estimate_rotation(prev: np.ndarray, cur: np.ndarray, max_deg: float = 45.0,
 
 def _clamp_half(v: float) -> float:
     return max(-0.5, min(0.5, v))
+
+
+def _profile_cost(key: np.ndarray, xs: np.ndarray, ys: np.ndarray, bin_deg: float,
+                  min_overlap: float, outlier_m: float) -> np.ndarray:
+    """Mismatch between ``key`` and each row of candidate points (xs, ys), in metres."""
+    n = key.size
+    a = np.arctan2(ys, xs)
+    r = np.hypot(xs, ys)
+    idx = np.floor(np.mod(np.degrees(a), 360.0) / bin_deg).astype(int) % n
+    profiles = np.full((xs.shape[0], n), np.inf)
+    rows = np.broadcast_to(np.arange(xs.shape[0])[:, None], idx.shape)
+    np.minimum.at(profiles, (rows, idx), r)
+    profiles[np.isinf(profiles)] = np.nan
+    diff = np.abs(profiles - key[None, :])
+    ok = ~np.isnan(diff)
+    count = ok.sum(axis=1)
+    cost = np.where(ok, np.minimum(np.nan_to_num(diff), outlier_m), 0.0).sum(axis=1)
+    return np.where(count >= min_overlap * n, cost / np.maximum(count, 1), np.inf)
+
+
+def _best_candidate(cost: np.ndarray, values: np.ndarray, min_contrast: float):
+    """The candidate value with the lowest cost, refined between grid points; None if unsure."""
+    best = int(np.argmin(cost))
+    if not np.isfinite(cost[best]) or best == 0 or best == cost.size - 1:
+        return None         # no overlap, or the true value lies outside the search window
+    left, mid, right = cost[best - 1], cost[best], cost[best + 1]
+    if not (np.isfinite(left) and np.isfinite(right)):
+        return None
+    near = cost[max(0, best - 3):best + 4]
+    if np.max(near[np.isfinite(near)]) - mid < min_contrast:
+        return None         # flat cost: the scene doesn't pin the value down
+    curve = left - 2.0 * mid + right
+    offset = _clamp_half(0.5 * (left - right) / curve) if curve > 1e-12 else 0.0
+    return float(values[best] + offset * (values[1] - values[0]))
+
+
+def estimate_translation(key: np.ndarray, angles: np.ndarray, ranges: np.ndarray,
+                         rotation: float = 0.0, guess: float = 0.0, span: float = 0.15,
+                         step_m: float = 0.01, bin_deg: float = 1.0, min_overlap: float = 0.3,
+                         outlier_m: float = 0.3, min_contrast: float = 0.004):
+    """How far forward (m, - = backward) the robot is from where ``key`` was scanned.
+
+    ``key`` is the range profile taken at the start of a straight drive; ``angles`` /
+    ``ranges`` are the current scan's returns and ``rotation`` (rad) how far the robot has
+    turned since. Each candidate distance near ``guess`` moves the current points back into
+    the key scan's frame and compares the resulting profile with ``key``. Matching against
+    one fixed scan, rather than chaining scan to scan, keeps errors from adding up over a
+    drive. Returns None when the match can't tell distances apart, e.g. in a long, bare
+    corridor with nothing ahead or behind, so the caller can fall back to dead reckoning.
+    """
+    if angles.size == 0:
+        return None
+    x = ranges * np.cos(angles + rotation)
+    y = ranges * np.sin(angles + rotation)
+    shifts = guess + np.arange(-span, span + step_m / 2, step_m)
+    xs = x[None, :] + shifts[:, None]
+    ys = np.broadcast_to(y, xs.shape)
+    cost = _profile_cost(key, xs, ys, bin_deg, min_overlap, outlier_m)
+    return _best_candidate(cost, shifts, min_contrast)
+
+
+def estimate_drive(key: np.ndarray, angles: np.ndarray, ranges: np.ndarray,
+                   rotation: float = 0.0, guess: float = 0.0, span_deg: float = 6.0,
+                   step_deg: float = 0.5, bin_deg: float = 1.0, min_overlap: float = 0.3,
+                   outlier_m: float = 0.3):
+    """(distance m or None, rotation rad) of the robot since ``key`` was scanned on a drive.
+
+    Chaining ``estimate_rotation`` scan to scan while driving drifts several degrees per
+    metre, because it assumes the robot only turned. This instead fits the distance and the
+    heading together against the drive's starting scan: distance first at the predicted
+    heading, then the heading at that distance, then the distance again. The heading stays
+    at ``rotation`` when the scene can't pin it down.
+    """
+    dist = estimate_translation(key, angles, ranges, rotation, guess, bin_deg=bin_deg,
+                                min_overlap=min_overlap, outlier_m=outlier_m)
+    if dist is None or angles.size == 0:
+        return dist, rotation
+    rots = rotation + np.radians(np.arange(-span_deg, span_deg + step_deg / 2, step_deg))
+    a = angles[None, :] + rots[:, None]
+    xs = ranges[None, :] * np.cos(a) + dist
+    ys = ranges[None, :] * np.sin(a)
+    cost = _profile_cost(key, xs, ys, bin_deg, min_overlap, outlier_m)
+    rot = _best_candidate(cost, rots, 0.002)
+    if rot is None:
+        return dist, rotation
+    again = estimate_translation(key, angles, ranges, rot, dist, span=0.05, bin_deg=bin_deg,
+                                 min_overlap=min_overlap, outlier_m=outlier_m)
+    return (dist if again is None else again), rot

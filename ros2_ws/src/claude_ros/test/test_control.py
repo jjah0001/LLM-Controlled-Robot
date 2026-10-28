@@ -122,3 +122,27 @@ def test_fixed_turn_continues_from_the_angle_already_turned():
     half = c.ControllerState(turned=turn - math.radians(1.0))
     state = c.step(half, intent, CLEAR, LIM, 1.0, 0.05)
     assert state.angular == 0.0 and 'turn_complete' in state.flags
+
+
+def test_fixed_distance_stops_at_the_distance_without_overshoot():
+    for metres, pace in ((1.0, 0.6), (0.3, 1.0), (-0.4, -0.4), (0.05, 0.4)):
+        intent = c.Intent(linear=pace, distance=metres, expires_at=100.0)
+        state, trace = _run(intent, CLEAR, 15.0)
+        assert 'drive_complete' in state.flags and state.linear == 0.0
+        assert abs(state.driven - metres) <= LIM.drive_tolerance + 0.005
+        assert abs(max((s.driven for s in trace), key=abs)) <= abs(metres) + 0.005
+
+
+def test_fixed_distance_holds_its_heading():
+    intent = c.Intent(linear=0.5, distance=1.0, expires_at=100.0)
+    drifted = c.ControllerState(turned=math.radians(10.0))
+    state = c.step(drifted, intent, CLEAR, LIM, 0.05, 0.05)
+    assert state.angular < 0.0                      # drifted left, so steer right
+
+
+def test_fixed_distance_still_obeys_the_safety_layer():
+    intent = c.Intent(linear=0.5, distance=1.0, expires_at=100.0)
+    state, _ = _run(intent, c.Perception(front=0.15, front_known=True), 2.0)
+    assert state.linear == 0.0 and 'blocked_front' in state.flags
+    state, _ = _run(intent, c.Perception(cliff_front=True, front_known=True), 2.0)
+    assert state.linear == 0.0

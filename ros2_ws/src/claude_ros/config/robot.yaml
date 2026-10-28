@@ -37,11 +37,25 @@ motion_controller:
     avoid_distance: 0.15          # m side gap where wall-avoidance steering starts
     avoid_gain: 0.6               # rad/s of steering at zero gap, full speed
     max_turn_while_blocked: 0.8   # rad/s
-    # Fixed turns (turn_deg) are measured with the LiDAR. Between scans the controller predicts
-    # with the commanded rate times this scale, which it then learns from the measured turns.
-    # Carpet duty spins the robot about 3x faster than commanded; "Turn done" log lines show it.
-    turn_rate_scale: 3.0
-    turn_lead_deg: 25.0           # a turn stops this early because the robot coasts (learned)
+    # Fixed turns (turn_deg) and distances (distance_m) are measured with the LiDAR, stop early
+    # by how far the robot coasts, then get up to max_corrections small, slow fixes. The robot
+    # learns the numbers below for each floor (hard_floor, carpet) and saves them in
+    # calibration_file; these are only the starting guesses for a floor it hasn't seen yet.
+    # Delete the file to relearn. "Turn done" / "Drive done" log lines show how it went.
+    turn_rate_scale: 3.0          # real / commanded turn rate (carpet duty spins ~3x faster)
+    turn_lead_deg: 25.0           # how far a turn coasts after the command stops
+    drive_rate_scale: 1.0         # real / commanded forward speed
+    drive_lead_m: 0.03            # how far a drive coasts after the command stops
+    calibration_file: ~/.ros/robot_memory/motion_calibration.json   # "" = don't save
+    turn_tolerance: 0.035         # rad (2 deg): the controller stops this close to its command
+    drive_tolerance: 0.01         # m
+    turn_correct_deg: 3.0         # after settling, correct a turn that is off by more than this
+    drive_correct_m: 0.025        # ... or a drive off by more than this
+    max_corrections: 3
+    settle_s: 0.8                 # wait at least this long, and until the LiDAR sees no motion
+    heading_hold_gain: 1.5        # how hard a fixed distance steers back onto its heading
+    stall_window_s: 1.5           # driven this long with no motion seen = stalled
+    auto_carpet_on_stall: true    # then switch the motors to carpet power by itself
 
 claude_agent:
   ros__parameters:

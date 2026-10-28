@@ -120,3 +120,61 @@ def test_self_mask_drops_only_close_returns_in_its_arc():
     ranges[186] = 0.50                 # a real obstacle further out in the arc stays
     ang, rng = pc.scan_to_polar(ranges, amin, inc, 0.01, 10.0, geom)
     assert 0.50 in rng
+
+
+# A 4 x 3 m room with a box and a bin in it, for the drive-measurement tests.
+_ROOM = np.array([[-1.5, -1.2, 2.5, -1.2], [2.5, -1.2, 2.5, 1.8], [2.5, 1.8, -1.5, 1.8],
+                  [-1.5, 1.8, -1.5, -1.2], [0.8, 0.5, 1.2, 0.5], [1.2, 0.5, 1.2, 0.9],
+                  [-0.6, -0.6, -0.3, -0.8]])
+
+
+def _room_scan(x, y, yaw, walls=_ROOM, n=450, noise=0.01):
+    """Returns (angles, ranges) seen by a robot at (x, y) facing yaw."""
+    rng = np.random.default_rng(0)
+    ang = np.linspace(-math.pi, math.pi, n, endpoint=False)
+    dx, dy = np.cos(ang + yaw)[:, None], np.sin(ang + yaw)[:, None]
+    ex, ey = (walls[:, 2] - walls[:, 0])[None], (walls[:, 3] - walls[:, 1])[None]
+    wx, wy = (walls[:, 0] - x)[None], (walls[:, 1] - y)[None]
+    det = ex * dy - dx * ey
+    with np.errstate(divide='ignore', invalid='ignore'):
+        t = (ex * wy - wx * ey) / det
+        s = (dx * wy - dy * wx) / det
+    t = np.where((np.abs(det) > 1e-9) & (t > 0) & (s >= 0) & (s <= 1), t, np.inf)
+    r = t.min(axis=1)
+    keep = np.isfinite(r)
+    return ang[keep], r[keep] + rng.normal(0.0, noise, keep.sum())
+
+
+def test_estimate_translation_measures_forward_and_backward_moves():
+    key = pc.range_profile(*_room_scan(0.0, 0.0, 0.0))
+    for moved, yaw in ((0.05, 0.0), (0.3, 0.03), (-0.2, -0.05)):
+        ang, rng = _room_scan(moved * math.cos(yaw), moved * math.sin(yaw), yaw)
+        est = pc.estimate_translation(key, ang, rng, rotation=yaw, guess=0.9 * moved)
+        assert abs(est - moved) < 0.01
+
+
+def test_estimate_translation_gives_up_in_a_bare_corridor():
+    corridor = np.array([[-20.0, -0.6, 20.0, -0.6], [-20.0, 0.6, 20.0, 0.6]])
+    key = pc.range_profile(*_room_scan(0.0, 0.0, 0.0, corridor))
+    ang, rng = _room_scan(0.3, 0.0, 0.0, corridor)
+    assert pc.estimate_translation(key, ang, rng, guess=0.25) is None
+
+
+def test_estimate_drive_tracks_distance_and_heading_over_a_metre():
+    key = pc.range_profile(*_room_scan(0.0, 0.0, 0.0))
+    dist, rot = 0.0, 0.0
+    for i in range(1, 41):
+        yaw = math.radians(3.0) * math.sin(i / 10.0)          # skid steer wobbles a little
+        x = 0.025 * i
+        d, rot = pc.estimate_drive(key, *_room_scan(x, 0.0, yaw), rotation=rot,
+                                   guess=dist + 0.025)
+        dist = d if d is not None else dist + 0.025
+        assert abs(dist - x) < 0.015
+    assert abs(rot - yaw) < math.radians(1.0)
+
+
+def test_estimate_rotation_can_search_around_a_guess():
+    key = pc.range_profile(*_room_scan(0.0, 0.0, 0.0))
+    cur = pc.range_profile(*_room_scan(0.0, 0.0, math.radians(120.0)))
+    est = pc.estimate_rotation(key, cur, max_deg=15.0, guess=math.radians(110.0))
+    assert abs(math.degrees(est) - 120.0) < 1.5

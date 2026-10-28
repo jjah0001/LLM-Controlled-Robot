@@ -39,7 +39,7 @@ latency); a local controller runs at 20 Hz and owns smoothness and safety.
 ```
 
 - **Decision** (`claude_ros/intent.py`): `{"linear": -1..1, "angular": -1..1, "turn_deg",
-  "duration_s", "reason", "say", "note", "floor"}`. Motion values are fractions of the
+  "distance_m", "duration_s", "reason", "say", "note", "floor"}`. Motion values are fractions of the
   controller's `max_linear` / `max_angular` (`angular > 0` = turn left) and go to
   `/claude/intent`; `say` goes to
   `/claude/say`; `note` is saved to memory. Claude's reply is constrained to this schema with
@@ -52,18 +52,36 @@ latency); a local controller runs at 20 Hz and owns smoothness and safety.
   Delete that file to make the robot forget.
 - An intent holds for `duration_s`, so motion continues between decisions. When it expires
   (API down, slow, refused) the controller ramps smoothly to a stop.
-- A non-zero `turn_deg` (-180..180) is a fixed turn: in place, at `|angular|` (default 0.5),
-  slowing near the end and stopping within about 2 degrees of the target, however long Claude
-  takes to answer. The agent doesn't ask Claude again until the turn is done and the robot
-  has settled for half a second.
-- Turning is measured with the LiDAR (`perception.estimate_rotation`): each scan is matched
-  against the previous one to find how far the room rotated. The motors are open loop, and at
-  carpet duty a small turn command runs them near full power, so the commanded rate can be out
-  by a factor of three. Between scans, and when the LiDAR is down, the controller uses the
-  commanded rotation times a scale it learns from the measured turns (`turn_rate_scale`).
-  At carpet duty the robot also coasts 20-30 degrees after the command drops to zero, so a
-  fixed turn stops early by `turn_lead_deg`, learned from how far each turn coasted. Each turn
-  logs `Turn done: asked ..., turned ...`; expect within about 20 degrees on carpet. The summary's `heading`
+- A non-zero `turn_deg` (-180..180) is a fixed turn: in place, at `|angular|` (default 0.5).
+  A non-zero `distance_m` (-1..2) is a fixed distance: straight, at `|linear|` (default 0.4),
+  holding the heading it started on (`heading_hold_gain`). Both are **goals**: they slow near
+  the end and stop by themselves however long Claude takes to answer, and the agent doesn't
+  ask Claude again until the summary's `goal` is null (finished) and the robot is still.
+- Goals are closed loop, because the motors are open loop (no encoders) and the same command
+  moves the robot very differently on carpet and hard floor. For each goal the controller:
+  1. measures the move with the LiDAR against the scan taken where the goal started
+     (`perception.estimate_rotation` with a `guess` for turns, `perception.estimate_drive`
+     for distances, which fits distance and heading together, since chaining scan-to-scan
+     rotation estimates while driving drifts about 5 degrees per metre);
+  2. stops early by the coast learned for the current floor (`calibration.plan`);
+  3. waits until it has stopped (`settle_s`, and no motion seen for 0.4 s), learns the coast
+     from the first move, and if the result is off by more than `turn_correct_deg` /
+     `drive_correct_m` makes up to `max_corrections` slow corrections;
+  4. reports the result in the summary's `last_goal` and logs `Turn done:` / `Drive done:`.
+  If a move times out without the safety layer holding it back, it is still checked and
+  corrected; if the safety layer blocked it, it ends as `blocked`. A goal driven for
+  `stall_window_s` with no measured motion switches the motors to carpet power
+  (`auto_carpet_on_stall`) and flags `stalled`.
+- What is learned (`claude_ros/calibration.py`) is kept per floor (`surface` from
+  `/motor_driver/power`): turn and drive speed scales (real / commanded, used between scans and
+  when the LiDAR is down) and turn and drive coasts. It is saved to `calibration_file`
+  (`~/.ros/robot_memory/motion_calibration.json`), so delete that file to relearn. In a
+  simulated room with laggy, slipping motors (3x turn rate, up to 0.5 s coast), goals end
+  within 1-2 degrees and 1-2 cm on average, against 4-23 degrees for the old fixed lead.
+- Outside goals, heading is measured by matching each scan against the previous one. A goal
+  in a scene the LiDAR can't pin down (a long bare corridor, or no LiDAR) falls back to the
+  commanded motion times the learned scale, is not corrected, and reports `measured_by:
+  "commanded (rough)"`. The summary's `heading`
   (`heading_deg`, `turned_recently_deg` over `turn_window_s`, `measured_by`) shows Claude
   which way it faces and whether it is going round in circles.
 - Safety lives only in `claude_ros/control.py`; prompts are not a safety mechanism.
@@ -115,7 +133,9 @@ Useful checks on the robot:
 - `ros2 topic echo /perception/summary`: fused view the agent sees (sectors, clearances, flags).
 - `ros2 topic pub --once /claude/intent std_msgs/String "{data: '{\"linear\":0.5,\"angular\":0.2,\"duration_s\":3,\"reason\":\"test\"}'}"`:
   drive by hand through the same safety layer, with the agent disabled. Add `\"turn_deg\":90`
-  (and `linear` 0) to turn 90 degrees left and stop.
+  (and `linear` 0) to turn 90 degrees left and stop, or `\"distance_m\":0.5` to drive half a
+  metre and stop. Measure the real result with a tape and compare it with the `Turn done` /
+  `Drive done` log line.
 - `ros2 run motor_driver keyboard_controller`: raw teleop (bypasses the safety layer; only with
   the motion controller stopped, since both publish `/cmd_vel`).
 
