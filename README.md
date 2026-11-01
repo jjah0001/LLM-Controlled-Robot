@@ -10,17 +10,22 @@ check, so you know it worked before moving on.
 
 | | |
 |---|---|
-| **Getting started** | [What you need](#what-you-need) · [1. Ubuntu](#step-1-put-ubuntu-on-the-sd-card) · [2. Connect](#step-2-connect-to-the-pi) · [3. ROS 2 Jazzy](#step-3-install-ros-2-jazzy) · [4. Robot code](#step-4-get-and-build-the-robot-code) · [5. First drive](#step-5-check-the-wiring-and-drive-by-keyboard) · [6. Run Ratangga](#step-6-let-claude-drive) |
+| **Getting started** | [What you need](#what-you-need) · [Words used](#words-used-in-this-guide) · [How to stop it](#safety-how-to-stop-the-robot) · [1. Ubuntu](#step-1-put-ubuntu-on-the-sd-card) · [2. Connect](#step-2-connect-to-the-pi) · [3. ROS 2 Jazzy](#step-3-install-ros-2-jazzy) · [4. Robot code](#step-4-get-and-build-the-robot-code) · [5. First drive](#step-5-check-the-wiring-and-drive-by-keyboard) · [6. Run Ratangga](#step-6-let-claude-drive) |
 | **Hardware setup** | [GPIO](#gpio-setup-motors-and-sensors) · [LiDAR](#lidar-setup-witmotion-d05) · [Camera](#rpi-camera-setup) · [Edge sensors](#edge-sensors-stops-falls) · [Motor power](#motor-power-pwm-and-carpet) |
 | **More** | [CLAUDE.md](CLAUDE.md) (Ratangga's personality and rules) · [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) (how the code works) |
 
 ## What you need
 
+| Front | Back (LiDAR on top, Raspberry Pi and wiring) |
+|---|---|
+| ![Ratangga from the front](images/front.jpg) | ![Ratangga from the back](images/back.jpg) |
+
 - The robot, which has a **Raspberry Pi 4** (2 GB or more; 4 GB is easier), an L298N motor
-  driver, two motors, the LiDAR, the camera and the ultrasonic sensor.
+  driver, four motors (the two left wheels share one L298N channel, the two right wheels the
+  other), the LiDAR, the camera and the ultrasonic sensor.
 - A **microSD card**, 32 GB or larger, and a way to plug it into your computer.
-- **Power:** a charged battery for the motors, and a 5 V 3 A USB-C supply or power bank for the
-  Pi. Use the mains supply while installing, because it takes a while.
+- **Power:** 8 fresh AA batteries for the motors, and a 5 V 3 A USB-C supply or power bank for
+  the Pi. Use a mains USB-C supply while installing, because it takes a while.
 - A computer (Mac, Windows or Linux) on the **same Wi-Fi** as the robot, and your Wi-Fi name
   and password.
 - An **Anthropic API key**, so Claude can drive. You can make one at
@@ -29,6 +34,34 @@ check, so you know it worked before moving on.
 
 You don't need a screen or keyboard for the Pi: you'll control it from your computer over
 Wi-Fi.
+
+### Words used in this guide
+
+- **Terminal:** a window where you type commands. A grey box in this guide is a command:
+  copy it, paste it into the terminal and press Enter. Lines starting with `#` are comments,
+  and text after `#` on a line is ignored, so you can paste it too.
+- **Copy and paste in a terminal:** select text with the mouse, then copy with **Cmd+C** on
+  a Mac, **Ctrl+C** or right-click in Windows PowerShell / Windows Terminal, or
+  **Ctrl+Shift+C** on Linux. Paste with **Cmd+V**, **Ctrl+V** / right-click, or
+  **Ctrl+Shift+V**. With nothing selected, **Ctrl+C stops the running command** instead of
+  copying, so on Linux always use Ctrl+Shift+C.
+- **Commands that keep running:** some commands, such as starting the robot or
+  `ros2 topic echo`, keep running and printing until you press **Ctrl+C**. When a box says
+  "in a second terminal", leave the first one running, open another terminal window on your
+  computer, connect to the Pi again (`ssh robot@ratangga.local`) and type it there.
+- **SSH:** typing commands on the Pi from your own computer, over Wi-Fi.
+- **`sudo`:** runs a command as administrator. It asks for your Pi password. Nothing is shown
+  while you type it; that's normal.
+- **ROS 2:** the software framework the robot runs on. Each program is a **node**; nodes talk
+  by sending messages on named channels called **topics** (such as `/scan` for the LiDAR).
+  A **launch** file starts several nodes at once.
+- **Workspace:** the `ros2_ws` folder, where the robot's code is built.
+
+### Safety: how to stop the robot
+
+Press **Ctrl+C** in the terminal that started the robot. The motors stop straight away. If
+that terminal is gone, switch off the motor battery. Keep the wheels off the ground (robot on
+a box) whenever a step says so.
 
 ## Step 1: Put Ubuntu on the SD card
 
@@ -81,8 +114,8 @@ In Step 2, the username is `ubuntu` instead of `robot`, so use it wherever this 
 device list (it shows up as `ubuntu`) and connect with, for example,
 `ssh ubuntu@192.168.1.42`. The first password is `ubuntu`, and Ubuntu makes you choose a new
 one straight away and then logs you out, so connect again with the new password. Then run
-`sudo hostnamectl set-hostname ratangga`, so `ratangga.local` works after Step 2's reboot. With no Wi-Fi at all, you can plug the
-Pi into your router with an Ethernet cable instead.
+`sudo hostnamectl set-hostname ratangga`, so `ratangga.local` works after Step 2's reboot.
+With no Wi-Fi at all, you can plug the Pi into your router with an Ethernet cable instead.
 
 ## Step 2: Connect to the Pi
 
@@ -105,8 +138,11 @@ Pi into your router with an Ethernet cable instead.
    sudo apt install -y avahi-daemon git curl
    sudo reboot
    ```
-   If apt says `Could not get lock`, Ubuntu is still installing updates in the background.
-   Wait a few minutes and try again. After `sudo reboot`, wait a minute and `ssh` in again.
+   If apt says `Waiting for cache lock` or `Could not get lock ... held by process ...
+   (unattended-upgr)`, Ubuntu is installing security updates in the background. This can
+   take half an hour on a new Pi. Don't stop it or reboot: let apt wait, and it carries on by
+   itself. If it gives up, run the same command again a few minutes later. This can happen at
+   any `sudo apt` step in this guide. After `sudo reboot`, wait a minute and `ssh` in again.
 
 **Every command from here on runs on the Pi, over SSH**, unless a step says otherwise.
 
@@ -137,8 +173,9 @@ Copy each block in turn and paste it into the SSH window.
    sudo apt update && sudo apt upgrade -y
    sudo apt install -y ros-jazzy-ros-base ros-dev-tools ros-jazzy-demo-nodes-py
    ```
-   If this fails with "unmet dependencies", run `grep Suites /etc/apt/sources.list.d/ubuntu.sources`.
-   The line must read `Suites: noble noble-updates noble-backports`. Fix it with
+   If this fails with "unmet dependencies", run `grep '^Suites' /etc/apt/sources.list.d/ubuntu.sources`.
+   The first line must read `Suites: noble noble-updates noble-backports` (the second,
+   `Suites: noble-security`, is fine). Fix it with
    `sudo nano /etc/apt/sources.list.d/ubuntu.sources`, then run the two commands again.
 4. Load ROS automatically in every new terminal, and set up `rosdep`, the tool that installs
    the robot code's dependencies:
@@ -185,12 +222,17 @@ Copy each block in turn and paste it into the SSH window.
    echo "source ~/LLM-Controlled-Robot/ros2_ws/install/setup.bash" >> ~/.bashrc
    source ~/.bashrc
    ```
+   `rosdep` may ask for your password. The build prints many yellow compiler warnings from
+   the LiDAR driver (`m1ct_d2`); ignore them, they are not errors.
+
    On a new Pi the build ends with `5 packages finished` and `1 package failed: camera_ros`.
    That's expected: the camera needs libcamera, which you build later in
    [RPi Camera setup](#rpi-camera-setup), and the rest of the robot works without it. Keep
    `--continue-on-error`: without it, colcon stops building everything else as soon as
    `camera_ros` fails, and nothing gets installed. If any other package fails, read the first
-   error it prints.
+   error it prints. If it says `6 packages finished`, an older apt copy of libcamera is
+   installed and `camera_ros` built against it. That copy usually can't stream from the Pi
+   camera, so still do [RPi Camera setup](#rpi-camera-setup).
 4. **Check GPIO** (no `sudo`, and with nothing else running):
    ```bash
    python3 ~/LLM-Controlled-Robot/tools/gpio_check.py
@@ -225,8 +267,9 @@ GPIO (BCM) number in brackets. [pinout.xyz](https://pinout.xyz/) shows where eac
 | Camera | Ribbon cable in the CAMERA connector. See [RPi Camera setup](#rpi-camera-setup) |
 | Edge sensors (optional) | See [Edge sensors](#edge-sensors-stops-falls) |
 
-First spin each wheel on its own, without ROS. Each wheel turns forward for a second, then
-backward:
+Put the 8 AA batteries in the motor battery holder. First spin each side on its own, without
+ROS. The two left wheels turn forward for a second, then backward, and then the two right
+wheels do the same:
 ```bash
 python3 ~/LLM-Controlled-Robot/tools/gpio_check.py --motors
 ```
@@ -241,21 +284,33 @@ In a second terminal (`ssh` in again), start the keyboard control:
 ros2 run motor_driver keyboard_controller
 ```
 Press **W** (forward), **S** (back), **A** (left), **D** (right), **X** (stop) and **Q**
-(quit). Hold a key down to keep moving: the wheels stop by themselves about half a second
-after the last key press.
+(quit). The arrow keys work too. Hold a key down to keep moving: the wheels stop by
+themselves about half a second after the last key press.
 
-- If a wheel turns backwards on **W**, set `invert_left: true` or `invert_right: true` under
-  `motor_driver:` in `ros2_ws/src/claude_ros/config/robot.yaml`. Then restart the motor driver.
-- If **A** turns right, both wheels are swapped: swap the left and right motor wires.
+- If one side turns backwards on **W**, set `invert_left: true` or `invert_right: true`
+  under `motor_driver:` in `ros2_ws/src/claude_ros/config/robot.yaml`. Then restart the motor
+  driver.
+- If **A** turns right, the sides are swapped: swap the left and right motor wires at the
+  L298N.
 - If the wheels hum but don't turn, the motor power is too low. See
   [Motor power](#motor-power-pwm-and-carpet).
 
-Press **Ctrl+C** in both terminals when you're done. Next, set up the
-[LiDAR](#lidar-setup-witmotion-d05) and check its directions. The robot uses the LiDAR to
-avoid walls, so do this before letting it drive on its own. Then set up the
-[camera](#rpi-camera-setup).
+Press **Ctrl+C** in both terminals when you're done.
+
+**Before Step 6, set up the sensors.** Their instructions are further down this page:
+1. [LiDAR setup](#lidar-setup-witmotion-d05), all five steps. The robot uses the LiDAR to
+   avoid walls, so don't skip the direction check in its step 5.
+2. [RPi Camera setup](#rpi-camera-setup). This takes the longest. If you want to try
+   driving first, skip it and add `use_camera:=false` in Step 6.
+
+Then come back to Step 6.
 
 ## Step 6: Let Claude drive
+
+Before you start, check that the wheels turn the right way (Step 5) and that the LiDAR passed
+its direction check ([LiDAR setup](#lidar-setup-witmotion-d05), step 5). Claude is asked for
+a decision about every 2 seconds while the robot runs, and each one is a paid API call, so
+stop the robot when you're not using it.
 
 1. Store your API key on the Pi. It is a secret, so don't share it or commit it to git:
    ```bash
@@ -269,8 +324,15 @@ avoid walls, so do this before letting it drive on its own. Then set up the
    ros2 launch claude_ros robot.launch.py
    ```
    Each decision appears in the log as a line from `claude_agent`, such as
-   `lin=+0.40 ang=+0.10 for 4.0s | Heading for the open doorway`, along with anything Ratangga
-   says or remembers. Press **Ctrl+C** to stop it: the motors stop straight away.
+   `[1.8s] lin=+0.40 ang=+0.10 for 4.0s | Heading for the open doorway` (the first number is
+   how long Claude took to decide), or `[3.1s] drive +0.40m at 0.40 | ...` and
+   `turn +90deg ...` for a fixed distance or turn, along with anything Ratangga says or
+   remembers. A `No fresh /perception/summary` warning in the first second is normal while the
+   sensors start up. Press
+   **Ctrl+C** to stop it: the motors stop straight away.
+
+   When you press Ctrl+C, the log may end with `KeyboardInterrupt` tracebacks and
+   `process has died` lines. They're harmless: the motors were already stopped before them.
 
 Useful options, added to the end of the launch line:
 
@@ -304,9 +366,15 @@ Step 4 already does all of this. Here is what each part does, so you can check i
    sudo apt remove -y python3-rpi.gpio
    sudo apt install -y python3-rpi-lgpio gpiod
    ```
-   A copy of `RPi.GPIO` installed with `pip` would hide the Ubuntu one. Check with
-   `pip list 2>/dev/null | grep -i rpi`: it must print nothing. If it lists `RPi.GPIO`, run
-   `pip uninstall --break-system-packages RPi.GPIO`.
+   A copy of `RPi.GPIO` installed with `pip` would hide the Ubuntu one. Check which one
+   Python uses:
+   ```bash
+   python3 -c "import RPi.GPIO as G; print(G.__file__)"
+   ```
+   It must print a path starting with `/usr/lib/python3/dist-packages/`. If it starts with
+   `/usr/local/` or contains `.local`, run `pip uninstall --break-system-packages RPi.GPIO`
+   (with `sudo` too if the path starts with `/usr/local/`). Don't go by `pip list`: it also
+   shows the Ubuntu packages, so it lists `rpi-lgpio` even when everything is right.
 2. **Allow your user to use the pins.** The robot's nodes run as your user, never as root.
    This rule gives the `dialout` group access to the GPIO device, and adds you to that group:
    ```bash
@@ -316,7 +384,8 @@ Step 4 already does all of this. Here is what each part does, so you can check i
    sudo reboot
    ```
    After the reboot, `groups` must list `dialout`, and `ls -l /dev/gpiochip0` must show
-   `crw-rw----` with `dialout`.
+   `crw-rw----` with `dialout`. Some Ubuntu images use a `gpio` group instead; showing `gpio`
+   is fine too, as long as `groups` also lists `gpio`. `gpio_check.py` checks this for you.
 3. **Give lgpio a folder for its temporary files.** lgpio creates small `.lgd-nfy*` files in
    the folder a program runs from. `export LG_WD=/tmp` (added to `~/.bashrc` in Step 4) keeps
    them in `/tmp` instead, so a robot started from any folder works.
@@ -338,7 +407,8 @@ Step 4 already does all of this. Here is what each part does, so you can check i
 
 | Problem | Fix |
 |---|---|
-| `Cannot determine SOC peripheral base address`, `No access to /dev/mem` or `This module can only be run on a Raspberry Pi!` | The classic `RPi.GPIO` is in use. Do item 1, including the `pip` check. |
+| `Cannot determine SOC peripheral base address`, `No access to /dev/mem` or `This module can only be run on a Raspberry Pi!` | The classic `RPi.GPIO` is in use. Do item 1, including the check of which copy Python uses. |
+| `ModuleNotFoundError: No module named 'RPi'` | No GPIO library is installed (for example, the `apt remove` in item 1 worked but the `apt install` didn't). Run `sudo apt install -y python3-rpi-lgpio`. |
 | `can not open gpiochip` or `Permission denied` | Do item 2. Then log out and back in, or reboot, so the group change applies. |
 | `GPIO not allocated` or `GPIO busy` | Another program holds that pin. See the rules above. `gpioinfo` lists each pin and what's using it. |
 | Error mentioning `.lgd-nfy` | Do item 3, then open a new terminal. |
@@ -375,17 +445,23 @@ on the Pi, in `~/LLM-Controlled-Robot/ros2_ws` (`cd ~/LLM-Controlled-Robot/ros2_
    ros2 run m1ct_d2 m1ct_d2 --ros-args -p port:=/dev/ttyUSB0
    ros2 topic hz /scan          # in a second terminal: a steady rate means it works
    ```
+   The driver prints lines like `scantime:0.10...` (and some Chinese status messages, which
+   are normal). `ros2 topic hz` should print `average rate: 10.0` or close to it every second.
+   Press **Ctrl+C** in both terminals to stop.
    To see the scan, run `rviz2` (on the Pi or a laptop on the same network), add a
    **LaserScan** display on `/scan`, and set **Fixed Frame** to `laser_link`.
 5. **Check the orientation.** This matters for safety. Start the stack without Claude and
    watch the fused view:
    ```bash
    ros2 launch claude_ros robot.launch.py use_agent:=false use_camera:=false
-   ros2 topic echo /perception/summary   # in a second terminal
+   ros2 topic echo --full-length /perception/summary   # in a second terminal
    ```
-   Hold a box about 30 cm in front of the robot, and `lidar_sectors_m.front` should drop.
-   Then move it to the robot's left, and `left` should drop. If the box shows up in the
-   wrong sector, edit `config/robot.yaml`:
+   The second terminal prints a long line of readings five times a second. Find the part
+   that starts `"lidar_sectors_m": {"front": ...`: these are the distances in metres in each
+   direction. Hold a box about 30 cm in front of the robot, and the `front` number should
+   drop to about `0.3`. Then move it to the robot's left, and `left` should drop. If the box
+   shows up in the wrong sector, edit `ros2_ws/src/claude_ros/config/robot.yaml` (for example
+   with `nano`), then stop the launch with **Ctrl+C** and start it again:
    - The front reading appears in another sector: set `lidar_yaw_offset_deg` to the angle
      between the LiDAR's zero mark and the robot's front (for example `180` or `-90`).
    - Left and right are swapped: set `lidar_reverse: true`.
@@ -403,11 +479,11 @@ on the Pi, in `~/LLM-Controlled-Robot/ros2_ws` (`cd ~/LLM-Controlled-Robot/ros2_
 ## RPi Camera setup
 
 **Why it usually fails on Ubuntu:** the `ros-jazzy-camera-ros` apt package comes with the
-*upstream* libcamera, which may not support your camera module (the Camera Module 3, for
-example, only works with Raspberry Pi's fork). Full Pi camera support on this robot's
-**Raspberry Pi 4** comes from **Raspberry Pi's libcamera fork**, built from source next to
-`camera_ros`. Ubuntu also blocks the memory buffers libcamera needs, unless you allow them
-(step 3).
+*upstream* libcamera. It often finds the camera (it may even list it) but then can't stream
+pictures from it: the log shows `IPAProxy ... Failed to call start: -110` and no images arrive.
+Reliable Pi camera support on this robot's **Raspberry Pi 4** comes from **Raspberry Pi's
+libcamera fork**, built from source next to `camera_ros`. Ubuntu also blocks the memory
+buffers libcamera needs, unless you allow them (step 3).
 
 Run the commands below on the Pi, in `~/LLM-Controlled-Robot/ros2_ws`.
 
@@ -415,13 +491,17 @@ Run the commands below on the Pi, in `~/LLM-Controlled-Robot/ros2_ws`.
    connector labelled CAMERA, between the micro-HDMI ports and the audio jack (not the DISPLAY
    connector by the SD card). Lift the latch, insert the ribbon with its metal contacts facing
    the HDMI ports (blue tab towards the USB/Ethernet ports), and press the latch down.
-2. **Enable the camera** in `/boot/firmware/config.txt`, then reboot:
+2. **Enable the camera** in `/boot/firmware/config.txt`. Open it with
+   `sudo nano /boot/firmware/config.txt`, make sure these two lines are in it:
    ```ini
    camera_auto_detect=1
    dtoverlay=vc4-kms-v3d
    ```
-   Remove or comment out any `start_x=1` line (the old legacy camera stack, which libcamera
-   cannot use). If it is still not found, turn auto detection off and name the sensor:
+   and put a `#` at the start of any `start_x=1` line (the old legacy camera stack, which
+   libcamera cannot use). If there is a `dtoverlay=vc4-fkms-v3d` line (note the extra **f**,
+   often under `[pi4]`), change it to `dtoverlay=vc4-kms-v3d`. Save with **Ctrl+O**, **Enter**,
+   leave with **Ctrl+X**, then `sudo reboot`. If the camera is still not found, turn auto
+   detection off and name the sensor:
    ```ini
    camera_auto_detect=0
    dtoverlay=imx708        # Camera Module 3   (imx219 = Module 2, ov5647 = Module 1, imx477 = HQ)
@@ -464,22 +544,29 @@ Run the commands below on the Pi, in `~/LLM-Controlled-Robot/ros2_ws`.
    ros2 launch claude_ros robot.launch.py use_lidar:=false use_agent:=false
    ros2 topic hz /camera/image_raw          # in a second terminal: a steady rate
    ```
+   `ros2 topic hz` should print an `average rate:` line every second. If it prints nothing,
+   no images are arriving: look in the launch terminal for errors and check the table below.
+   The camera log is long and colourful; an `INFO` line saying `Registered camera` is good.
    To see the picture, run `ros2 run rqt_image_view rqt_image_view` on a computer on the
    same network (`sudo apt install ros-jazzy-rqt-image-view`).
 
 | Problem | Fix |
 |---|---|
+| Camera is found but no images arrive; log shows `Call timeout!` and `Failed to call start: -110` | camera_ros is using the apt (upstream) libcamera. Do step 4, then step 5 and rebuild from clean: `rm -rf build/camera_ros install/camera_ros`. |
 | `no cameras available` | `cam -l` is empty too: check the cable and step 2. `cam -l` works: camera_ros is using the wrong libcamera (step 4, then rebuild from clean: `rm -rf build/camera_ros install/camera_ros`). |
 | `Could not open any dma-buf provider` / `Failed to allocate buffers` | Step 3 (log out and back in). Still failing: lower `width`/`height` in `robot.yaml`. |
 | Image is zoomed in (Camera Module 2) | Set `sensor_mode: "1640:1232"` under `camera:` in `robot.yaml`. |
-| Image is upside down | Set `orientation: 180` under `camera:` in `robot.yaml`. |
+| Image is upside down | Change `orientation` under `camera:` in `robot.yaml`: the default is `180` (for this robot's upside-down mount), so set `0`, or `180` if you changed it. |
+| Error that `camera_calibration_parsers` can't open a calibration file | Harmless: the robot doesn't need a calibrated camera. |
+| Warnings `unsupported control: AfWindows` or `Could not set AF_PAUSE` / `AF_TRIGGER` | Harmless autofocus messages from the Camera Module 3. |
 | `[robot.launch] camera_ros not found` | `camera_ros` didn't build: rerun step 5 and read the first error. |
 | `camera_ros` fails with `libcamera::Span ... is deprecated` | `src/libcamera` or `src/camera_ros` is newer than the tested versions in the `.repos` files. Run `vcs import src < camera.repos && vcs import src < robot.repos`, then all of step 5 again from `rosdep install`. |
 | Need more detail | `LIBCAMERA_LOG_LEVELS=*:DEBUG ros2 run camera_ros camera_node` |
 
 If the camera still won't cooperate, the robot runs without it: launch with
-`use_camera:=false`. If no frame newer than `image_timeout_s` is available, Claude is told the
-camera is unavailable and decides from the LiDAR and ultrasonic distances alone.
+`use_camera:=false`. Whenever the latest picture is more than a second old (the
+`image_timeout_s` setting), Claude is told the camera is unavailable and decides from the
+LiDAR and ultrasonic distances alone.
 
 ## Edge sensors (stops falls)
 
@@ -496,7 +583,9 @@ digital `DO`/`OUT` pin and a sensitivity potentiometer).
 floor and **at least 5 cm in front of the wheels**. The robot needs that much room to stop.
 Put them at the corners, not in the middle: if the robot meets an edge at a shallow angle, a
 corner reaches it first.
-Add a third one at the back (named e.g. `rear`) if the robot often reverses.
+Add a third one at the back if the robot often reverses: wire it like the others to a free
+GPIO pin, then add `rear` to `sensor_names` and its BCM pin number to `sensor_pins` under
+`cliff_publisher:` in `robot.yaml`.
 
 **Wiring** (power the modules from 3.3 V so their output is safe for the Pi's GPIO; any 3.3 V
 and GND header pins will do):
@@ -516,8 +605,16 @@ and GND header pins will do):
    ros2 launch claude_ros robot.launch.py use_cliff:=true
    ros2 topic echo /cliff          # second terminal: lift the front, "front" must become true
    ```
-3. Bench test: push the robot slowly toward a table edge by hand (agent off:
-   `use_agent:=false`) and check it stops while its front wheels are still well on the table.
+3. Table test. Keep one hand ready to catch the robot the whole time. Put it on a table,
+   about 30 cm from an edge, facing the edge. Start it without Claude:
+   `ros2 launch claude_ros robot.launch.py use_cliff:=true use_agent:=false`. In a second
+   terminal, send it a slow forward command:
+   ```bash
+   ros2 topic pub --rate 2 /claude/intent std_msgs/String \
+     "{data: '{\"linear\":0.15,\"angular\":0.0,\"duration_s\":1.0,\"reason\":\"edge test\"}'}"
+   ```
+   It must stop while its front wheels are still well on the table. Press **Ctrl+C** in the
+   second terminal to stop sending the command, then in the first.
 
 Both modules can share the 3.3 V supply. Never power them from 5 V: their output would then
 be 5 V, which can damage the Pi's GPIO.
@@ -578,14 +675,18 @@ Ratangga can also switch the preset itself. If it keeps asking to move but its d
 don't change, it assumes the wheels are stalling and switches to `carpet`. It switches back
 when the camera shows a hard floor again.
 
-**Finding your numbers:** run `ros2 launch claude_ros robot.launch.py use_agent:=false`, then
-in another terminal send a slow forward command through the safety layer:
+**Finding your numbers:** the robot will drive forward slowly, so put it on the floor
+with at least 2 m of open space in front (the safety layer stops it before a wall). Run
+`ros2 launch claude_ros robot.launch.py use_agent:=false`, then in another terminal send a
+slow forward command through the safety layer. It keeps driving until you press **Ctrl+C**
+in that terminal:
 
 ```bash
 ros2 topic pub --rate 2 /claude/intent std_msgs/String \
   "{data: '{\"linear\":0.15,\"angular\":0.0,\"duration_s\":1.0,\"reason\":\"duty test\"}'}"
 ```
 
-Lower `min_duty` with `ros2 param set` until the wheels stop turning, then set the preset about
-5 above that value. Do this once on a hard floor and once on carpet. Copy the results into
-`config/robot.yaml` so they stick.
+In a third terminal, lower `min_duty` step by step with `ros2 param set /motor_driver
+min_duty ...` until the wheels stop turning, then set the preset about 5 above that value.
+Do this once on a hard floor and once on carpet. Copy the results into
+`ros2_ws/src/claude_ros/config/robot.yaml` so they stick.

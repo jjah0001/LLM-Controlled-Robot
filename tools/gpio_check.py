@@ -46,12 +46,14 @@ def check_library():
             'sudo pip uninstall --break-system-packages RPi.GPIO  (and the same without sudo)')
     else:
         ok(f'RPi.GPIO from {path}')
-    try:
-        import lgpio  # noqa: F401  (present when RPi.GPIO is the rpi-lgpio version)
-        ok('using rpi-lgpio (works on Ubuntu 24.04)')
-    except ImportError:
+    # The classic RPi.GPIO is a C extension (RPi._GPIO). rpi-lgpio is pure Python on top of
+    # lgpio. Don't just test "import lgpio": python3-lgpio can be installed on its own,
+    # next to the classic library.
+    if 'RPi._GPIO' in sys.modules:
         bad('this is the classic RPi.GPIO, which often fails on Ubuntu 24.04',
             'sudo apt remove python3-rpi.gpio && sudo apt install python3-rpi-lgpio')
+    else:
+        ok('using rpi-lgpio (works on Ubuntu 24.04)')
     return GPIO
 
 
